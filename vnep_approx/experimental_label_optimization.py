@@ -85,7 +85,7 @@ assert not has_cycle(set(map(frozenset, ["ab", "ac"])))
 
 
 def format_label_sets(label_sets):
-    return "{" + ", ".join(sorted("".join(sorted(x)) for x in label_sets)) + "}"
+    return "{" + ", ".join(sorted("_".join(sorted(x)) for x in label_sets)) + "}"
 
 
 def main():
