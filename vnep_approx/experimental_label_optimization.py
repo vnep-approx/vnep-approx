@@ -3,10 +3,11 @@ from heapq import heappush, heappop
 import string
 import sys
 import timeit
-from collections import deque
+from collections import deque, namedtuple
 from itertools import combinations, chain
 
 import random
+
 # random.seed(0)
 
 sys.stderr = sys.stdout
@@ -57,24 +58,27 @@ def remove_subsets(label_sets):
 def has_cycle(label_sets):
     if not label_sets:
         return False
-    queue = deque([list(label_sets)[0]])
-    visited = set(queue)
-    visited_edges = set()
-    while queue:
-        labels = queue.popleft()
-        # print("labels", labels)
-        for other_labels in label_sets:
-            # print("other", other_labels)
-            if other_labels == labels or not (labels & other_labels):
-                continue
-            edge = frozenset([labels, other_labels])
-            if edge in visited_edges:
-                continue
-            visited_edges.add(edge)
-            if other_labels in visited:
-                return True
-            queue.append(other_labels)
-            visited.add(other_labels)
+    not_visited = set(label_sets)
+    while not_visited:
+        queue = deque([not_visited.pop()])
+        visited = set(queue)
+        visited_edges = set()
+        while queue:
+            labels = queue.popleft()
+            # print("labels", labels)
+            for other_labels in label_sets:
+                # print("other", other_labels)
+                if other_labels == labels or not (labels & other_labels):
+                    continue
+                edge = frozenset([labels, other_labels])
+                if edge in visited_edges:
+                    continue
+                visited_edges.add(edge)
+                if other_labels in visited:
+                    return True
+                queue.append(other_labels)
+                visited.add(other_labels)
+        not_visited -= visited
     return False
 
 
@@ -148,13 +152,12 @@ def slow_algorithm(label_sets):
             if s < best_size:
                 best_size = s
                 best_valid_factor = factor_set
-        # if not has_cycle(residual_label_sets):
-        #     sys.stdout.write("\033[34m")
-        # else:
-        #     sys.stdout.write("\033[31m")
-        # print ("{:%s}  {:1}  {}  {}" % len(all_labels)).format("".join(factor), has_cycle(residual_label_sets), len(factor_set) + size(residual_label_sets), format_label_sets(residual_label_sets))
+                # if not has_cycle(residual_label_sets):
+                #     sys.stdout.write("\033[34m")
+                # else:
+                #     sys.stdout.write("\033[31m")
+                # print ("{:%s}  {:1}  {}  {}" % len(all_labels)).format("".join(factor), has_cycle(residual_label_sets), len(factor_set) + size(residual_label_sets), format_label_sets(residual_label_sets))
     return best_valid_factor, i
-
 
 
 def super_duper_algorithm(label_sets):
@@ -179,7 +182,7 @@ def super_duper_algorithm(label_sets):
             i += 1
 
 
-def super_duper_algorithm2(label_sets):
+def optimize_bag(label_sets):
     all_labels = set(chain(*label_sets))
     residual_label_sets = remove_subsets(label_sets)
     queue = [(size(residual_label_sets), has_cycle(residual_label_sets), 0, frozenset(), residual_label_sets)]
@@ -188,8 +191,15 @@ def super_duper_algorithm2(label_sets):
     best_valid_size = float("inf")
     i = 1
     while queue:
-        # print "\033[0m", i, queue
+        # print i, queue
         s, hc, lf, factor, label_sets = heappop(queue)
+        # print "s={} hc={} fs={} f={} ls={}".format(
+        #     s,
+        #     hc,
+        #     lf,
+        #     "_".join(sorted(factor)),
+        #     format_label_sets(label_sets),
+        # )
         if not hc:
             return factor, i
         for l in all_labels - factor:
@@ -205,6 +215,81 @@ def super_duper_algorithm2(label_sets):
                 if not new_hc:
                     best_valid_size = new_size
             i += 1
+
+
+class QueueElement(namedtuple("QueueElement", "size has_cycle factor_size factor label_sets candidates")):
+    def __str__(self):
+        return "s={} hc={} fs={} f={} ls={} cs={}".format(
+            self.size,
+            self.has_cycle,
+            self.factor_size,
+            "_".join(sorted(self.factor)),
+            format_label_sets(self.label_sets),
+            "_".join(sorted(self.candidates)),
+        )
+
+
+def is_candidate(req, i):
+    if not req.get_out_neighbors(i):
+        return True
+
+    stack = [i]
+    while stack:
+        node = stack.pop()
+        for other in req.get_out_neighbors(node):
+            if len(req.get_in_neighbors(other)) > 1:
+                return False
+            stack.append(other)
+    return True
+
+def optimize_bag_leaves_first(req, label_sets):
+    all_labels = set(chain(*label_sets))
+
+    candidates = frozenset(i for i in all_labels if is_candidate(req, i))
+
+    residual_label_sets = remove_subsets(label_sets)
+    queue = [QueueElement(size(residual_label_sets), has_cycle(residual_label_sets), 0, frozenset(), residual_label_sets, candidates)]
+    # e = (size, has_cycle, factor)
+    visited = set()
+    best_valid_size = float("inf")
+    i = 1
+    while queue:
+        # print "\033[0m", i, queue
+        s, hc, lf, factor, label_sets, candidates = qe = heappop(queue)
+        # print qe
+        if not hc:
+            return factor, i
+        for l in candidates:
+            extended_factor = factor | {l}
+            if extended_factor in visited:
+                continue
+            visited.add(extended_factor)
+            residual_label_sets = remove_subsets(residual(label_sets, {l}))
+            new_size = len(extended_factor) + size(residual_label_sets)
+            if new_size < best_valid_size:
+                new_hc = has_cycle(residual_label_sets)
+
+                new_candidates = candidates - {l}
+                for p in req.get_in_neighbors(l):
+                    while len(req.get_in_neighbors(p)) == 1:
+                        p = req.get_in_neighbors(p)[0]
+
+                    if req.get_in_neighbors(p):
+                        new_candidates = new_candidates | {p}
+
+                heappush(queue, QueueElement(new_size, new_hc, len(extended_factor), extended_factor, residual_label_sets, new_candidates))
+                if not new_hc:
+                    best_valid_size = new_size
+            i += 1
+    print "ERROR!!!!"
+
+    with open("out/output/req.gv", "w") as f:
+        from alib import util
+        f.write(util.get_graph_viz_string(req))
+
+    with open("out/output/req.pickle", "w") as f:
+        import cPickle
+        cPickle.dump(req, f)
 
 
 if __name__ == "__main__":
