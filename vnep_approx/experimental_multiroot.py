@@ -84,7 +84,7 @@ ITERATIONS = 5000
 ORIENTATION_ITERATIONS = 1000
 
 def execute(iteration):
-    req = generate_random_request_graph(15, 0.5, req_name="req_{}".format(iteration))
+    req = generate_random_request_graph(12, 0.5, req_name="req_{}".format(iteration))
     best_max_bagsize, best_max_bagsize_optimized, best_orientation, iteration_results, best_oriented_req = find_best_random_orientation(req, ORIENTATION_ITERATIONS)
     evaluate_best_orientation(req, iteration, best_max_bagsize, best_max_bagsize_optimized, iteration_results[best_orientation], best_oriented_req)
     print "Completed iteration ", iteration
@@ -196,91 +196,13 @@ def find_best_random_orientation_multiple(req, iterations=1000, optimize_bag_fun
     oriented_requests = []
 
     for orientation_iteration in range(iterations):
-        # oriented_req = generate_random_acyclic_orientation(req)
+        oriented_req = generate_random_acyclic_orientation(req)
 
-        # DELETE ME LATER!!!!
-        oriented_req = datamodel.Request("asdf")
-        oriented_req.add_node("R", "t1", ("u",))
-        oriented_req.add_node("1", "t1", ("u",))
-        oriented_req.add_node("2", "t1", ("u",))
-        oriented_req.add_node("3", "t1", ("u",))
-        oriented_req.add_node("4", "t1", ("u",))
-        oriented_req.add_node("5", "t1", ("u",))
-        oriented_req.add_node("6", "t1", ("u",))
-        oriented_req.add_node("7", "t1", ("u",))
-        # oriented_req.add_node("8", "t1", ("u",))
-        # oriented_req.add_node("9", "t1", ("u",))
-        oriented_req.add_node("10", "t1", ("u",))
-        # oriented_req.add_node("11", "t1", ("u",))
-        oriented_req.add_node("12", "t1", ("u",))
-        oriented_req.add_node("13", "t1", ("u",))
-        oriented_req.add_node("14", "t1", ("u",))
-        oriented_req.add_node("15", "t1", ("u",))
-
-        oriented_req.add_node("w1", "t1", ("u",))
-        oriented_req.add_node("w2", "t1", ("u",))
-        oriented_req.add_node("w3", "t1", ("u",))
-        oriented_req.add_node("w4", "t1", ("u",))
-        oriented_req.add_node("w5", "t1", ("u",))
-        oriented_req.add_node("w6", "t1", ("u",))
-        oriented_req.add_node("w7", "t1", ("u",))
-
-        oriented_req.graph["root"] = "R"
-
-        # oriented_req.add_edge("R", "11", 1.0)
-        oriented_req.add_edge("R", "13", 1.0)
-        oriented_req.add_edge("1", "3", 1.0)
-        oriented_req.add_edge("2", "14", 1.0)
-        oriented_req.add_edge("2", "10", 1.0)
-        oriented_req.add_edge("4", "1", 1.0)
-        oriented_req.add_edge("4", "3", 1.0)
-        oriented_req.add_edge("4", "5", 1.0)
-        oriented_req.add_edge("4", "10", 1.0)
-        oriented_req.add_edge("6", "3", 1.0)
-        oriented_req.add_edge("7", "1", 1.0)
-        # oriented_req.add_edge("8", "1", 1.0)
-        # oriented_req.add_edge("8", "14", 1.0)
-        # oriented_req.add_edge("9", "14", 1.0)
-        # oriented_req.add_edge("11", "3", 1.0)
-        # oriented_req.add_edge("11", "6", 1.0)
-        # oriented_req.add_edge("11", "8", 1.0)
-        # oriented_req.add_edge("11", "9", 1.0)
-        # oriented_req.add_edge("11", "10", 1.0)
-        oriented_req.add_edge("12", "3", 1.0)
-        oriented_req.add_edge("12", "6", 1.0)
-        oriented_req.add_edge("12", "10", 1.0)
-        oriented_req.add_edge("13", "2", 1.0)
-        oriented_req.add_edge("13", "4", 1.0)
-        oriented_req.add_edge("13", "15", 1.0)
-        oriented_req.add_edge("13", "12", 1.0)
-        oriented_req.add_edge("13", "10", 1.0)
-        oriented_req.add_edge("13", "14", 1.0)
-        oriented_req.add_edge("15", "6", 1.0)
-        oriented_req.add_edge("15", "7", 1.0)
-
-        oriented_req.add_edge("R", "w1", 1.0)
-        oriented_req.add_edge("10", "w1", 1.0)
-        oriented_req.add_edge("13", "w2", 1.0)
-        oriented_req.add_edge("13", "w3", 1.0)
-        oriented_req.add_edge("w2", "w4", 1.0)
-        oriented_req.add_edge("w2", "w5", 1.0)
-        oriented_req.add_edge("w3", "w4", 1.0)
-        oriented_req.add_edge("w3", "w5", 1.0)
-        oriented_req.add_edge("w4", "w6", 1.0)
-        oriented_req.add_edge("w5", "w6", 1.0)
-        oriented_req.add_edge("w6", "w7", 1.0)
-        oriented_req.add_edge("14", "w7", 1.0)
-
-        # DELETE ME LATER!!!!
-
-        # if orientation_iteration != 566:
-        #     continue
         oriented_requests.append(oriented_req)
         labels = CommutativityLabels.create_labels(oriented_req)
 
         sizes = {}
         sizes_optimized = {}
-        # print "ORIENTATION ITERATION: ", orientation_iteration
         for optimize_bag in optimize_bag_functions:
             iteration_results[optimize_bag][orientation_iteration] = result_dict = {}
             max_bagsize = -1
@@ -291,7 +213,6 @@ def find_best_random_orientation_multiple(req, iterations=1000, optimize_bag_fun
                 result_dict[i] = {}
 
                 for bag_key, bag_edges in i_label_bags.items():
-                    # print "\ni:", i, ", bag key:", bag_key
                     max_bagsize = max(max_bagsize, len(bag_key))
                     edge_label_sets = {frozenset(labels.get_edge_labels(ij)) for ij in bag_edges}
                     factored_labels, _ = optimize_bag(oriented_req, edge_label_sets)
@@ -302,26 +223,6 @@ def find_best_random_orientation_multiple(req, iterations=1000, optimize_bag_fun
 
             sizes[optimize_bag] = max_bagsize
             sizes_optimized[optimize_bag] = max_bagsize_optimized
-
-            # DELETE THIS LATER
-            i_label_bags = labels.label_bags["13"]
-            assert len(i_label_bags) == 1
-            bag_edges = i_label_bags.values()[0]
-            edge_label_sets = {frozenset(labels.get_edge_labels(ij)) for ij in bag_edges}
-            factored_labels, _ = optimize_bag(oriented_req, edge_label_sets)
-            without_subsets = remove_subsets(bag_residual(edge_label_sets, factored_labels))
-            size = bag_size(without_subsets) + len(factored_labels)
-            print optimize_bag.__name__, size, "_".join(sorted(factored_labels)), format_label_sets(without_subsets)
-
-        # DELETE THIS LATER
-        i_label_bags = labels.label_bags["13"]
-        assert len(i_label_bags) == 1
-        bag_edges = i_label_bags.values()[0]
-        edge_label_sets = {frozenset(labels.get_edge_labels(ij)) for ij in bag_edges}
-        factored_labels = frozenset(["10", "w1"])
-        without_subsets = remove_subsets(bag_residual(edge_label_sets, factored_labels))
-        size = bag_size(without_subsets) + len(factored_labels)
-        print "manual", size, "_".join(sorted(factored_labels)), format_label_sets(without_subsets)
 
         # if len(set(sizes_optimized.values())) != 1:
         for optimize_bag in optimize_bag_functions:
@@ -339,9 +240,6 @@ def find_best_random_orientation_multiple(req, iterations=1000, optimize_bag_fun
                 write_original=False
             )
 
-        # DELETE ME LATER!!!!
-        break
-        # DELETE ME LATER!!!!
 
 def evaluate_interesting():
     with open("out/interesting/1128_req.pickle", "r") as f:
@@ -366,10 +264,10 @@ def main():
     pool.map(execute, range(ITERATIONS))
 
 def main2():
-    # pool = mp.Pool()
-    # pool.map(compare_bag_algorithms, range(ITERATIONS))
+    pool = mp.Pool()
+    pool.map(compare_bag_algorithms, range(ITERATIONS))
 
-    compare_bag_algorithms(0)
+    # compare_bag_algorithms(0)
 
     # for i in tqdm.tqdm(range(ITERATIONS)):
     #     i = 11

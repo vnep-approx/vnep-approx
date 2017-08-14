@@ -85,7 +85,7 @@ def has_cycle(label_sets):
 # assert has_cycle(set(map(frozenset, ["ab", "bc", "cd", "de", "ea"])))
 # assert not has_cycle(remove_subsets(set(map(frozenset, ["ab", "a"]))))
 # assert not has_cycle(set(map(frozenset, ["ab", "ab"])))
-assert not has_cycle(set(map(frozenset, ["ab", "ac"])))
+# assert not has_cycle(set(map(frozenset, ["ab", "ac"])))
 
 
 def format_label_sets(label_sets):
