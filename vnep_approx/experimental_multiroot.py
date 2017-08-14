@@ -130,23 +130,23 @@ def evaluate_best_orientation(req, iteration, best_max_bagsize, best_max_bagsize
             nodes_text += '",peripheries="2'
         nodes_text += '"];\n'
 
-    # if has_factor and is_interesting:
-    prefix = ""
-    if use_time_diff:
-        time_diff = int(time.time() - start_time)
-        prefix = "{:05}_".format(time_diff)
-    with open("out/output/{}{}.gv".format(prefix, iteration), "w") as f:
-        f.write(util.get_graph_viz_string(
-            best_oriented_req,
-            get_edge_style=lambda (i, j): 'style="dashed"' if i == "R" else ""
-        ).replace("\n", "\n" + nodes_text, 1))
-    with open("out/output/{}{}_oriented_req.pickle".format(prefix, iteration), "w") as f:
-        cPickle.dump(best_oriented_req, f)
-    if write_original:
-        with open("out/output/{}{}_orig.gv".format(prefix, iteration), "w") as f:
-            f.write(util.get_graph_viz_string(req))
-        with open("out/output/{}{}_orig_req.pickle".format(prefix, iteration), "w") as f:
-            cPickle.dump(req, f)
+    if has_factor and is_interesting:
+        prefix = ""
+        if use_time_diff:
+            time_diff = int(time.time() - start_time)
+            prefix = "{:05}_".format(time_diff)
+        with open("out/output/{}{}.gv".format(prefix, iteration), "w") as f:
+            f.write(util.get_graph_viz_string(
+                best_oriented_req,
+                get_edge_style=lambda (i, j): 'style="dashed"' if i == "R" else ""
+            ).replace("\n", "\n" + nodes_text, 1))
+        with open("out/output/{}{}_oriented_req.pickle".format(prefix, iteration), "w") as f:
+            cPickle.dump(best_oriented_req, f)
+        if write_original:
+            with open("out/output/{}{}_orig.gv".format(prefix, iteration), "w") as f:
+                f.write(util.get_graph_viz_string(req))
+            with open("out/output/{}{}_orig_req.pickle".format(prefix, iteration), "w") as f:
+                cPickle.dump(req, f)
 
 
 def find_best_random_orientation(req, iterations=1000):
@@ -176,11 +176,6 @@ def find_best_random_orientation(req, iterations=1000):
                 size = bag_size(without_subsets) + len(factored_labels)
                 max_bagsize_optimized = max(max_bagsize_optimized, size)
                 iteration_results[orientation_iteration][i][bag_key] = (factored_labels, without_subsets, size)
-                # if factored_labels:
-                #     print "\n\n"
-                #     print format_label_sets(edge_label_sets), len(bag_key)
-                #     print "_".join(factored_labels), format_label_sets(without_subsets), size
-        # print max_bagsize, max_bagsize_optimized
         if max_bagsize_optimized < best_max_bagsize_optimized:
             best_max_bagsize_optimized = max_bagsize_optimized
             best_max_bagsize = max_bagsize
@@ -252,7 +247,7 @@ def evaluate_interesting():
 def compare_bag_algorithms(iteration):
     req = generate_random_request_graph(15, 0.3, req_name="req_{}".format(iteration))
 
-    def optimize_bag_bla( req, label_sets):
+    def optimize_bag_bla(req, label_sets):
         return optimize_bag(label_sets)
     optimize_bag_bla.__name__ = "optimize_bag"
     find_best_random_orientation_multiple(req, ORIENTATION_ITERATIONS, optimize_bag_functions=(optimize_bag_bla, optimize_bag_leaves_first))

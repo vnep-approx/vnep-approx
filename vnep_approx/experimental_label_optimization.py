@@ -9,6 +9,7 @@ from itertools import combinations, chain
 import random
 
 # random.seed(0)
+from vnep_approx.commutativity_model import CommutativityLabels
 
 sys.stderr = sys.stdout
 
@@ -91,6 +92,19 @@ def has_cycle(label_sets):
 def format_label_sets(label_sets):
     return "{" + ", ".join(sorted("_".join(sorted(x)) for x in label_sets)) + "}"
 
+
+def get_bag_width(req):
+    labels = CommutativityLabels.create_labels(req)
+    max_bagsize_optimized = -1
+    for i in req.nodes:
+        i_label_bags = labels.label_bags[i]
+        for bag_key, bag_edges in i_label_bags.items():
+            edge_label_sets = {frozenset(labels.get_edge_labels(ij)) for ij in bag_edges}
+            factored_labels, _ = optimize_bag(edge_label_sets)
+            without_subsets = remove_subsets(residual(edge_label_sets, factored_labels))
+            factored_bag_size = size(without_subsets) + len(factored_labels)
+            max_bagsize_optimized = max(max_bagsize_optimized, factored_bag_size)
+    return max_bagsize_optimized
 
 def main():
     label_sets = generate_labels()
@@ -191,15 +205,7 @@ def optimize_bag(label_sets):
     best_valid_size = float("inf")
     i = 1
     while queue:
-        # print i, queue
         s, hc, lf, factor, label_sets = heappop(queue)
-        # print "s={} hc={} fs={} f={} ls={}".format(
-        #     s,
-        #     hc,
-        #     lf,
-        #     "_".join(sorted(factor)),
-        #     format_label_sets(label_sets),
-        # )
         if not hc:
             return factor, i
         for l in all_labels - factor:
@@ -283,13 +289,13 @@ def optimize_bag_leaves_first(req, label_sets):
             i += 1
     print "ERROR!!!!"
 
-    with open("out/output/req.gv", "w") as f:
-        from alib import util
-        f.write(util.get_graph_viz_string(req))
-
-    with open("out/output/req.pickle", "w") as f:
-        import cPickle
-        cPickle.dump(req, f)
+    # with open("out/output/req.gv", "w") as f:
+    #     from alib import util
+    #     f.write(util.get_graph_viz_string(req))
+    #
+    # with open("out/output/req.pickle", "w") as f:
+    #     import cPickle
+    #     cPickle.dump(req, f)
 
 
 if __name__ == "__main__":
