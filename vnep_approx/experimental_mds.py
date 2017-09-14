@@ -1,11 +1,11 @@
 import numpy as np
+import time
 
 from matplotlib import pyplot as plt
 from matplotlib.collections import LineCollection
 
 from sklearn import manifold
-from sklearn.metrics import euclidean_distances, pairwise_distances
-from sklearn.decomposition import PCA
+from sklearn.metrics import pairwise_distances
 
 from experimental_orientation import paper_algorithm
 from experimental_label_optimization import get_bag_width
@@ -13,7 +13,7 @@ from experimental_multiroot import generate_random_request_graph
 
 
 def generate_and_store_data():
-    req = generate_random_request_graph(10, 0.2)
+    req = generate_random_request_graph(8, 0.4)
 
     edges_ordered = sorted(req.edges)
     data = []
@@ -89,6 +89,7 @@ def mds_eval():
     lc.set_linewidths(0.5 * np.ones(len(segments)))
     ax.add_collection(lc)
     plt.colorbar()
+    plt.savefig("out/output/mds_{}.png".format(int(time.time())), dpi=300)
     plt.show()
 
 
@@ -96,5 +97,5 @@ def mds_eval():
 if __name__ == "__main__":
     while True:
         generate_and_store_data()
-        # mds_eval()
-        orientation_distance_eval()
+        mds_eval()
+        # orientation_distance_eval()
