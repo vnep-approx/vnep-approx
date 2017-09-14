@@ -147,10 +147,11 @@ def main2():
     print "fast: {:10} {:4} {} {}".format("".join(sorted(factor)), iterations, has_cycle(residual_label_sets), len(factor) + size(residual_label_sets), format_label_sets(residual_label_sets))
     print "time:", min(timeit.repeat("super_duper_algorithm(label_sets)", "from __main__ import super_duper_algorithm\nlabel_sets={!r}".format(label_sets), number=100))
 
-    factor, iterations = super_duper_algorithm2(label_sets)
+    factor, iterations = optimize_bag(label_sets)
     residual_label_sets = remove_subsets(residual(label_sets, factor))
     print "fast: {:10} {:4} {} {}".format("".join(sorted(factor)), iterations, has_cycle(residual_label_sets), len(factor) + size(residual_label_sets), format_label_sets(residual_label_sets))
-    print "time:", min(timeit.repeat("super_duper_algorithm2(label_sets)", "from __main__ import super_duper_algorithm2\nlabel_sets={!r}".format(label_sets), number=100))
+    print "time:", min(timeit.repeat("optimize_bag(label_sets)", "from __main__ import optimize_bag\nlabel_sets={!r}".format(label_sets), number=100))
+
 
 
 def slow_algorithm(label_sets):
