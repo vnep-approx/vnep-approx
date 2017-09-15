@@ -74,35 +74,36 @@ class ExtendedGraph(datamodel.Graph):
         # function mapping : 1. supersource 2. internal functions 3. supersink
         # 1. supersource
         start = request.sequence[0]
-        for u in substrate.get_nodes_by_type(request.node[start]['type']):
-            if (not request.node[start]['allowed_nodes'] or u in
-                request.node[start]['allowed_nodes']):
+        start_type = request.get_type(start)
+        for u in substrate.get_nodes_by_type(start_type):
+            start_allowed_nodes = request.get_allowed_nodes(start)
+            if start_allowed_nodes is None or u in start_allowed_nodes:
                 self.add_inter_edge(self.super_source,
                                     self.get_node_name(u, request.get_out_edge(start)),
-                                    origin=(request.node[start]['type'], u, start))
+                                    origin=(start_type, u, start))
 
         # 2. between nodes
-        if (len(request.sequence) > 2):
+        if len(request.sequence) > 2:
             for req_index in xrange(0, len(request.sequence) - 2):
                 current = request.sequence[req_index]
                 nextnode = request.sequence[req_index + 1]
-                for u in substrate.get_nodes_by_type(request.node[nextnode]['type']):
-                    if (not
-                        request.node[nextnode]['allowed_nodes'] or
-                                u in
-                                request.node[nextnode]['allowed_nodes']):
+                nextnode_type = request.get_type(nextnode)
+                for u in substrate.get_nodes_by_type(nextnode_type):
+                    nextnode_allowed_nodes = request.get_allowed_nodes(nextnode)
+                    if nextnode_allowed_nodes is None or u in nextnode_allowed_nodes:
                         self.add_inter_edge(self.get_node_name(u, request.get_out_edge(current)),
                                             self.get_node_name(u, request.get_out_edge(nextnode)),
-                                            origin=(request.node[nextnode]['type'], u, nextnode))
+                                            origin=(nextnode_type, u, nextnode))
         # 3. supersink
         end = request.sequence[len(request.sequence) - 1]
         before_end = request.sequence[len(request.sequence) - 2]
-        for u in substrate.get_nodes_by_type(request.node[end]['type']):
-            if (not request.node[end]['allowed_nodes'] or u in
-                request.node[end]['allowed_nodes']):
+        end_type = request.get_type(end)
+        for u in substrate.get_nodes_by_type(end_type):
+            end_allowed_nodes = request.get_allowed_nodes(end)
+            if end_allowed_nodes is None or u in end_allowed_nodes:
                 self.add_inter_edge(self.get_node_name(u, request.get_out_edge(before_end)),
                                     self.super_sink,
-                                    origin=(request.node[end]['type'], u, end))
+                                    origin=(end_type, u, end))
 
     def add_node(self, u, origin, layer_index):
         super(ExtendedGraph, self).add_node(u, origin=origin, layer_index=layer_index)

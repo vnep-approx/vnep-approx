@@ -582,11 +582,11 @@ class CommutativityModelCreator(modelcreator.AbstractEmbeddingModelCreator):
         load_dict = {(x, y): 0.0 for (x, y) in self.substrate.substrate_resources}
         for i in req.nodes:
             u = mapping.get_mapping_of_node(i)
-            t = req.node[i]["type"]
-            demand = req.node[i]["demand"]
+            t = req.get_type(i)
+            demand = req.get_node_demand(i)
             load_dict[(t, u)] += demand
         for ij in req.edges:
-            demand = req.edge[ij]["demand"]
+            demand = req.get_edge_demand(ij)
             for uv in mapping.mapping_edges[ij]:
                 load_dict[uv] += demand
         return load_dict
@@ -612,9 +612,9 @@ class CommutativityModelCreator(modelcreator.AbstractEmbeddingModelCreator):
         """
         dag_request = datamodel.Request("{}_dag".format(req.name))
         for node in req.nodes:
-            demand = req.node[node]["demand"]
-            ntype = req.node[node]["type"]
-            allowed = req.node[node]["allowed_nodes"]
+            demand = req.get_node_demand(node)
+            ntype = req.get_type(node)
+            allowed = req.get_allowed_nodes(node)
             dag_request.add_node(node, demand=demand, ntype=ntype, allowed_nodes=allowed)
         cls._add_dag_edges_and_initialize_exploration_queue_with_leaf_nodes(req, dag_request)
         return dag_request
@@ -670,7 +670,7 @@ class CommutativityModelCreator(modelcreator.AbstractEmbeddingModelCreator):
             new_head, new_tail = edge
         else:
             new_tail, new_head = edge
-        demand = req.edge[edge]["demand"]
+        demand = req.get_edge_demand(edge)
         dag_request.add_edge(new_tail, new_head, demand)
 
     def _make_reversed_substrate(self):
@@ -849,7 +849,7 @@ class EdgeSubLP(object):
             coefficients & gurobi variables
         :return: the extended load_constraint_dict
         """
-        ij_demand = self.dag_req.edge[self.ij]["demand"]
+        ij_demand = self.dag_req.get_edge_demand(self.ij)
         for uv, var in self.var_edge_flow.iteritems():
             uv_original_orientation = uv
             if self.is_reversed_edge:

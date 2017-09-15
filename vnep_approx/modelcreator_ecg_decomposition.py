@@ -436,10 +436,10 @@ class ModelCreatorCactusDecomposition(modelcreator.AbstractEmbeddingModelCreator
                     v_ij = ext_graph.path_layer_nodes[ij][v]
                     if (j, i) in ext_graph.reversed_request_edges:
                         ext_edge = v_ij, u_ij
-                        demand = req.edge[(j, i)]["demand"]
+                        demand = req.get_edge_demand((j, i))
                     else:
                         ext_edge = u_ij, v_ij
-                        demand = req.edge[ij]["demand"]
+                        demand = req.get_edge_demand(ij)
                     constraints[(u, v)].append((demand, self.var_edge_flow[req][ext_edge]))
         for cycle in ext_graph.ecg_cycles:
             valid_cycle_end_nodes = self.substrate.get_valid_nodes(
@@ -964,11 +964,11 @@ class Decomposition(object):
         req = self.request
         for i in req.nodes:
             u = mapping.get_mapping_of_node(i)
-            t = req.node[i]["type"]
-            demand = req.node[i]["demand"]
+            t = req.get_type(i)
+            demand = req.get_node_demand(i)
             load[(t, u)] += demand
         for ij in req.edges:
-            demand = req.edge[ij]["demand"]
+            demand = req.get_edge_demand(ij)
             for uv in mapping.mapping_edges[ij]:
                 load[uv] += demand
         return load

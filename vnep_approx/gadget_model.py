@@ -1233,7 +1233,7 @@ class CactusGadget(AbstractGadget):
                 if j in nodes_handled_by_other_gadgets:
                     continue
                 nodes_handled_by_other_gadgets.add(j)
-                j_type = self.request.node[j]["type"]
+                j_type = self.request.get_type(j)
                 for u in self.request.get_allowed_nodes(j):
                     if u not in self.substrate.get_valid_nodes(self.request.get_type(j),
                                                                self.request.get_node_demand(j)):
@@ -1242,7 +1242,7 @@ class CactusGadget(AbstractGadget):
                     u_ij = self.ext_graph.path_layer_nodes[ij][u]
                     u_jl = self.ext_graph.path_layer_nodes[jl][u]
                     ext_edge = u_ij, u_jl
-                    demand = self.request.node[j]["demand"]
+                    demand = self.request.get_node_demand(j)
                     constraints[j_type, u].append((demand, self.gurobi_vars["edge_flow"][ext_edge]))
         for cycle in self.ext_graph.ecg_cycles:
             valid_target_substrate_nodes = self.substrate.get_valid_nodes(
@@ -1260,7 +1260,7 @@ class CactusGadget(AbstractGadget):
                     if j in nodes_handled_by_other_gadgets:
                         continue
                     nodes_handled_by_other_gadgets.add(j)
-                    j_type = self.request.node[j]["type"]
+                    j_type = self.request.get_type(j)
                     for u in self.request.get_allowed_nodes(j):
                         if u not in self.substrate.get_valid_nodes(self.request.get_type(j),
                                                                    self.request.get_node_demand(j)):
@@ -1270,14 +1270,14 @@ class CactusGadget(AbstractGadget):
                             u_ij = self.ext_graph.cycle_layer_nodes[ij][u][w]
                             u_jl = self.ext_graph.cycle_layer_nodes[jl][u][w]
                             ext_edge = u_ij, u_jl
-                            demand = self.request.node[j]["demand"]
+                            demand = self.request.get_node_demand(j)
                             constraints[j_type, u].append((demand, self.gurobi_vars["edge_flow"][ext_edge]))
         for i in source_sink_request_nodes:
             if i in nodes_handled_by_other_gadgets:
                 continue
             nodes_handled_by_other_gadgets.add(i)
-            i_type = self.request.node[i]["type"]
-            demand = self.request.node[i]["demand"]
+            i_type = self.request.get_type(i)
+            demand = self.request.get_node_demand(i)
             for u in self.request.get_allowed_nodes(i):
                 if u not in self.substrate.get_valid_nodes(self.request.get_type(i),
                                                            self.request.get_node_demand(i)):
@@ -1296,10 +1296,10 @@ class CactusGadget(AbstractGadget):
                     v_ij = self.ext_graph.path_layer_nodes[ij][v]
                     if (j, i) in self.ext_graph.reversed_request_edges:
                         ext_edge = v_ij, u_ij
-                        demand = self.request.edge[(j, i)]["demand"]
+                        demand = self.request.get_edge_demand((j, i))
                     else:
                         ext_edge = u_ij, v_ij
-                        demand = self.request.edge[ij]["demand"]
+                        demand = self.request.get_edge_demand(ij)
                     constraints[(u, v)].append((demand, self.gurobi_vars["edge_flow"][ext_edge]))
         for cycle in self.ext_graph.ecg_cycles:
             valid_target_substrate_nodes = self.substrate.get_valid_nodes(
@@ -1316,10 +1316,10 @@ class CactusGadget(AbstractGadget):
                             v_ij = self.ext_graph.cycle_layer_nodes[ij][v][w]
                             if (j, i) in self.ext_graph.reversed_request_edges:
                                 ext_edge = v_ij, u_ij
-                                demand = self.request.edge[(j, i)]["demand"]
+                                demand = self.request.get_edge_demand((j, i))
                             else:
                                 ext_edge = u_ij, v_ij
-                                demand = self.request.edge[ij]["demand"]
+                                demand = self.request.get_edge_demand(ij)
                             constraints[(u, v)].append((demand, self.gurobi_vars["edge_flow"][ext_edge]))
 
                             # print "Edge load ({}, {}):".format(u, v)[:37].ljust(40), expr, "= 0"

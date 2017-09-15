@@ -31,6 +31,10 @@ class DecompositionError(Exception): pass
 
 
 class ModelCreatorDecomp(modelcreator.AbstractEmbeddingModelCreator):
+    """
+    Solve models for the embedding of linear requests.
+    """
+
     def __init__(self, scenario, gurobi_settings=None):
         super(ModelCreatorDecomp, self).__init__(scenario=scenario, gurobi_settings=gurobi_settings)
 
@@ -44,16 +48,12 @@ class ModelCreatorDecomp(modelcreator.AbstractEmbeddingModelCreator):
         self.temporal_log = modelcreator.TemporalLog()
 
     def preprocess_input(self):
-
         modelcreator.AbstractEmbeddingModelCreator.preprocess_input(self)
 
         # create extended graphs
         for req in self.requests:
-            self.extended_graph[req] = extendedgraph.ExtendedGraph(req, self.substrate)
-
-        for req in self.requests:
-
-            ext_graph = self.extended_graph[req]
+            ext_graph = extendedgraph.ExtendedGraph(req, self.substrate)
+            self.extended_graph[req] = ext_graph
 
             self.ext_graph_edges_node[req] = {}
             self.ext_graph_edges_edge[req] = {}
@@ -65,7 +65,6 @@ class ModelCreatorDecomp(modelcreator.AbstractEmbeddingModelCreator):
                 self.ext_graph_edges_edge[req][(stail, shead)] = []
 
             for ext_edge in ext_graph.edges:
-
                 if "node_origin" in ext_graph.edge[ext_edge]:
                     ntype, snode, vnode = ext_graph.edge[ext_edge]["node_origin"]
                     self.ext_graph_edges_node[req][(ntype, snode)].append((ext_edge, vnode))
@@ -88,8 +87,17 @@ class ModelCreatorDecomp(modelcreator.AbstractEmbeddingModelCreator):
                                                                   name=variable_id)
 
     def create_constraints_other_than_bounding_loads_by_capacities(self):
+        self._flow_induction_constraints()
 
-        # flow induction
+        self._flow_preservation_constraints()
+
+        self._load_computation_nodes_constraints()
+
+        self._load_computation_edges_constraints()
+
+        self.model.update()
+
+    def _flow_induction_constraints(self):
         for req in self.requests:
             ext_graph = self.extended_graph[req]
 
@@ -101,9 +109,8 @@ class ModelCreatorDecomp(modelcreator.AbstractEmbeddingModelCreator):
             constr_name = modelcreator.construct_name("flow_induction", req_name=req.name)
             self.model.addConstr(expr, GRB.EQUAL, 0.0, name=constr_name)
 
-        # flow preservation
+    def _flow_preservation_constraints(self):
         for req in self.requests:
-
             ext_graph = self.extended_graph[req]
 
             for ext_node in ext_graph.nodes:
@@ -117,33 +124,29 @@ class ModelCreatorDecomp(modelcreator.AbstractEmbeddingModelCreator):
                 constr_name = modelcreator.construct_name("flow_preservation", req_name=req.name, other=ext_node)
                 self.model.addConstr(expr, GRB.EQUAL, 0.0, name=constr_name)
 
-        # load computation nodes
-
+    def _load_computation_nodes_constraints(self):
         for req in self.requests:
-
             for (ntype, snode) in self.substrate.substrate_node_resources:
-                expr = LinExpr([(req.node[i]['demand'], self.var_flow[req][sedge_ext])
+                expr = LinExpr([(req.get_node_demand(i), self.var_flow[req][sedge_ext])
                                 for (sedge_ext, i) in self.ext_graph_edges_node[req][(ntype, snode)]] +
                                [(-1.0, self.var_request_load[req][(ntype, snode)])])
 
                 constr_name = modelcreator.construct_name("compute_node_load", req_name=req.name, snode=snode, type=ntype)
                 self.model.addConstr(expr, GRB.EQUAL, 0.0, name=constr_name)
 
-        # load computation edges
-
+    def _load_computation_edges_constraints(self):
         for req in self.requests:
 
             for (u, v) in self.substrate.substrate_edge_resources:
-                expr = LinExpr([(req.edge[vedge]['demand'], self.var_flow[req][sedge_ext])
-                                for (sedge_ext, vedge) in self.ext_graph_edges_edge[req][(u, v)]] +
-                               [(-1.0, self.var_request_load[req][(u, v)])]
-                               )
+                expr = LinExpr(
+                    [(req.get_edge_demand(vedge), self.var_flow[req][sedge_ext])
+                     for (sedge_ext, vedge) in self.ext_graph_edges_edge[req][(u, v)]] +
+                    [(-1.0, self.var_request_load[req][(u, v)])]
+                )
 
                 constr_name = modelcreator.construct_name("compute_edge_load", req_name=req.name, sedge=(u, v))
 
                 self.model.addConstr(expr, GRB.EQUAL, 0.0, name=constr_name)
-
-        self.model.update()
 
     def recover_integral_solution_from_variables(self):
         solution_name = modelcreator.construct_name("solution_", req_name="",
@@ -183,7 +186,6 @@ class ModelCreatorDecomp(modelcreator.AbstractEmbeddingModelCreator):
 
         # PERFORM BFS
         while len(queue) > 0:
-            # TODO better solution?
             current_enode = queue[0]
 
             if current_enode == ext_graph.super_sink:
@@ -199,7 +201,9 @@ class ModelCreatorDecomp(modelcreator.AbstractEmbeddingModelCreator):
                     predecessor[ee_head] = ee_tail
 
         if predecessor[ext_graph.super_sink] is None:
-            raise DecompositionError("Never possible")  # TODO..
+            print "Predecessor dictionary:"
+            print predecessor
+            raise DecompositionError("Decomposition did not reach super sink node!")
 
         # reconstruct path
         eedge_path = []
@@ -254,7 +258,7 @@ class ModelCreatorDecomp(modelcreator.AbstractEmbeddingModelCreator):
             # mapping = mp_pkg.Mapping(mapping_name, req, self.substrate, is_embedded=is_embedded)
 
             if is_embedded:
-                maps = self.obtain_fractional_mapping_of_request(req)
+                maps = self.obtain_fractional_mappings_of_request(req)
                 if not maps:
                     mapping_name = modelcreator.construct_name("empty_mapping_", req_name=req.name,
                                                                sub_name=self.substrate.name)
@@ -267,7 +271,7 @@ class ModelCreatorDecomp(modelcreator.AbstractEmbeddingModelCreator):
     def post_process_fractional_computation(self):
         return self.solution
 
-    def obtain_fractional_mapping_of_request(self, req, eps=0.00001):
+    def obtain_fractional_mappings_of_request(self, req, eps=0.00001):
         maps = []
         total_flow = self.var_flow[req]
         ext_graph = self.extended_graph[req]
@@ -335,7 +339,7 @@ class ModelCreatorDecomp(modelcreator.AbstractEmbeddingModelCreator):
                 # map first node of service chain according to first edge
                 ntype, snode, vnode = ext_graph.edge[eedge]["node_origin"]
                 mapping.map_node(vnode, snode)
-                load[(ntype, snode)] += req.node[vnode]["demand"]
+                load[(ntype, snode)] += req.get_node_demand(vnode)
                 last_used_edge = 0
                 previous_vnode = vnode
             else:
@@ -343,16 +347,17 @@ class ModelCreatorDecomp(modelcreator.AbstractEmbeddingModelCreator):
                     # this edge represents a node mapping
                     ntype, snode, vnode = ext_graph.edge[eedge]["node_origin"]
                     mapping.map_node(vnode, snode)
-                    load[(ntype, snode)] += req.node[vnode]["demand"]
+                    load[(ntype, snode)] += req.get_node_demand(vnode)
                     # map path between previous_vnode and vnode
 
                     eedge_path_connecting_previous_vnode_and_vnode = eedge_path[last_used_edge + 1:index]
 
                     se_path = [ext_graph.edge[eedge]["edge_origin"][0] for eedge in eedge_path_connecting_previous_vnode_and_vnode]
 
-                    mapping.map_edge((previous_vnode, vnode), se_path)
+                    new_edge = (previous_vnode, vnode)
+                    mapping.map_edge(new_edge, se_path)
                     for u, v in se_path:
-                        load[(u, v)] += req.edge[(previous_vnode, vnode)]["demand"]
+                        load[(u, v)] += req.get_edge_demand(new_edge)
 
                     last_used_edge = index
                     previous_vnode = vnode
