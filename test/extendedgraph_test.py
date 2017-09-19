@@ -15,11 +15,6 @@ def test_extendedgraph_generation():
     request.graph['end_node'] = 'j'
     request.add_edge('i', 'j', 2)
     request.add_edge('j', 'l', 2)
-    # REQUEST LATENCY
-    path = list(request.get_edges())
-    request.add_latency_requirement(path, 5)
-    latency = request.get_latency_requirement(path)
-    assert request.get_latency_requirement(path) == 5
     # SUBSTRATE: - NODES
     substrate.add_node('u', ["FW"], {"FW": 1}, {"FW": 1})
     substrate.add_node('v', ["FW"], {"FW": 1}, {"FW": 1})

@@ -692,7 +692,6 @@ class CommutativityModelCreator(modelcreator.AbstractEmbeddingModelCreator):
         for tail, head in self.substrate.edges:
             original_edge_properties = self.substrate.edge[(tail, head)]
             reversed_substrate.add_edge(head, tail,
-                                        latency=original_edge_properties["latency"],
                                         capacity=original_edge_properties["capacity"],
                                         cost=original_edge_properties["cost"],
                                         bidirected=False)
