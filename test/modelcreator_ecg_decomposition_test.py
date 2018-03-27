@@ -105,18 +105,19 @@ class TestCactusModelCreator:
         mc_ecg.model.optimize()
         assert mc_ecg.model.getAttr(GRB.Attr.ObjVal) == pytest.approx(1000.0)
 
-    def _test_mc_ecg_ignores_unprofitable_requests(self):
+    def test_mc_ecg_ignores_unprofitable_requests_when_using_max_profit_objective(self):
         profit_req = copy.deepcopy(self.request)
         no_profit_req = copy.deepcopy(self.request)
-        profit_req.name = "test_req_1"
-        no_profit_req.name = "test_req_2"
+        profit_req.name = "profit_req"
+        no_profit_req.name = "no_profit_req"
         profit_req.profit = 1000.0
         no_profit_req.profit = 0.0
         scenario = datamodel.Scenario("test_scenario", self.substrate, [profit_req, no_profit_req],
                                       objective=datamodel.Objective.MAX_PROFIT)
         mc_ecg = modelcreator_ecg_decomposition.ModelCreatorCactusDecomposition(scenario)
-        assert no_profit_req not in mc_ecg.profitable_requests
-        assert profit_req in mc_ecg.profitable_requests
+        assert no_profit_req not in mc_ecg.requests
+        assert no_profit_req in mc_ecg.all_requests
+        assert profit_req in mc_ecg.requests
 
         mc_ecg.init_model_creator()
 
@@ -133,8 +134,45 @@ class TestCactusModelCreator:
         assert isinstance(fs, solutions.FractionalScenarioSolution)
         assert profit_req in fs.request_mapping
         assert no_profit_req not in fs.request_mapping
+
+        # Ensure that profit_req was mapped
         assert sum([fs.mapping_flows[m.name] for m in fs.request_mapping[profit_req]]) == 1
-        assert not fs.request_mapping["test_req_2"]
+        for i in profit_req.nodes:
+            assert all(i in mapping.mapping_nodes for mapping in fs.request_mapping[profit_req])
+        for ij in profit_req.edges:
+            assert all(ij in mapping.mapping_edges for mapping in fs.request_mapping[profit_req])
+
+    def test_mc_ecg_does_not_ignore_unprofitable_requests_when_using_min_cost_objective(self):
+        profit_req = copy.deepcopy(self.request)
+        no_profit_req = copy.deepcopy(self.request)
+        profit_req.name = "profit_req"
+        no_profit_req.name = "no_profit_req"
+        profit_req.profit = 1000.0
+        no_profit_req.profit = 0.0
+        scenario = datamodel.Scenario("test_scenario", self.substrate, [profit_req, no_profit_req],
+                                      objective=datamodel.Objective.MIN_COST)
+        mc_ecg = modelcreator_ecg_decomposition.ModelCreatorCactusDecomposition(scenario)
+        assert no_profit_req in mc_ecg.requests
+        assert no_profit_req in mc_ecg.all_requests
+        assert profit_req in mc_ecg.requests
+
+        mc_ecg.init_model_creator()
+
+        # Check that the unprofitable request is in the Gurobi Model:
+        assert no_profit_req in mc_ecg.extended_graphs
+        assert no_profit_req in mc_ecg.var_node_flow
+        assert no_profit_req in mc_ecg.var_edge_flow
+        assert no_profit_req in mc_ecg.var_request_load
+        assert no_profit_req in mc_ecg.var_node_flow
+        assert no_profit_req in mc_ecg.var_node_flow
+
+        fs = mc_ecg.compute_fractional_solution()
+        # Check that the unprofitable request *is* in the fractional solution
+        assert isinstance(fs, solutions.FractionalScenarioSolution)
+        assert profit_req in fs.request_mapping
+        assert no_profit_req in fs.request_mapping
+        assert sum([fs.mapping_flows[m.name] for m in fs.request_mapping[profit_req]]) == 1
+        assert sum([fs.mapping_flows[m.name] for m in fs.request_mapping[no_profit_req]]) == 1
         for i in profit_req.nodes:
             assert all(i in mapping.mapping_nodes for mapping in fs.request_mapping[profit_req])
         for ij in profit_req.edges:

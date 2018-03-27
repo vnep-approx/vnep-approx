@@ -25,7 +25,7 @@ import time
 
 from gurobipy import GRB, LinExpr
 
-from alib import solutions, util, modelcreator
+from alib import solutions, util, modelcreator, datamodel
 from . import extendedcactusgraph
 
 
@@ -62,6 +62,11 @@ class ModelCreatorCactusDecomposition(modelcreator.AbstractEmbeddingModelCreator
 
         self._originally_allowed_nodes = {}
         self.extended_graphs = {}
+
+        epsilon = 0.0001
+        self.all_requests = self.requests
+        if self.scenario.objective == datamodel.Objective.MAX_PROFIT:
+            self.requests = [r for r in self.requests if r.profit > epsilon]
 
         self.ext_graph_edges_node = {}
         self.ext_graph_edges_edge = {}
