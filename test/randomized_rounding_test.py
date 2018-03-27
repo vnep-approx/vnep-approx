@@ -48,6 +48,7 @@ class TestRandomizedRounding:
                         "node_resource_factor": 0.01,
                         "edge_resource_factor": 100,
                         "iterations": 10,
+                        "arbitrary_edge_orientations": False,
                         "max_cycles": 20,
                         "layers": 4,
                         "normalize": True,

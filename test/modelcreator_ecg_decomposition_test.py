@@ -1,3 +1,5 @@
+import copy
+
 import pytest
 from gurobipy import GRB
 
@@ -57,7 +59,7 @@ class TestCactusModelCreator:
         assert mc_mip.model.getAttr(GRB.Attr.ObjVal) == pytest.approx(mc_ecg.model.getAttr(GRB.Attr.ObjVal))
 
     def test_can_handle_request_whose_node_demand_exceeds_all_substrate_capacities(self):
-        self.request.node["p"]["demand"] = 10 ** 10
+        self.request.node["p"]["demand"] = 10**10
         scenario = datamodel.Scenario("test_scenario", self.substrate, [self.request],
                                       objective=datamodel.Objective.MAX_PROFIT)
         mc_ecg = modelcreator_ecg_decomposition.ModelCreatorCactusDecomposition(scenario)
@@ -66,7 +68,7 @@ class TestCactusModelCreator:
         assert mc_ecg.model.getAttr(GRB.Attr.ObjVal) == pytest.approx(0.0)
 
     def test_can_handle_request_whose_edge_demand_exceeds_all_substrate_capacities(self):
-        self.request.edge[("m", "p")]["demand"] = 10 ** 10
+        self.request.edge[("m", "p")]["demand"] = 10**10
         scenario = datamodel.Scenario("test_scenario", self.substrate, [self.request],
                                       objective=datamodel.Objective.MAX_PROFIT)
         mc_ecg = modelcreator_ecg_decomposition.ModelCreatorCactusDecomposition(scenario)
@@ -102,6 +104,41 @@ class TestCactusModelCreator:
         mc_ecg.init_model_creator()
         mc_ecg.model.optimize()
         assert mc_ecg.model.getAttr(GRB.Attr.ObjVal) == pytest.approx(1000.0)
+
+    def _test_mc_ecg_ignores_unprofitable_requests(self):
+        profit_req = copy.deepcopy(self.request)
+        no_profit_req = copy.deepcopy(self.request)
+        profit_req.name = "test_req_1"
+        no_profit_req.name = "test_req_2"
+        profit_req.profit = 1000.0
+        no_profit_req.profit = 0.0
+        scenario = datamodel.Scenario("test_scenario", self.substrate, [profit_req, no_profit_req],
+                                      objective=datamodel.Objective.MAX_PROFIT)
+        mc_ecg = modelcreator_ecg_decomposition.ModelCreatorCactusDecomposition(scenario)
+        assert no_profit_req not in mc_ecg.profitable_requests
+        assert profit_req in mc_ecg.profitable_requests
+
+        mc_ecg.init_model_creator()
+
+        # Check that the unprofitable request is not in the Gurobi Model:
+        assert no_profit_req not in mc_ecg.extended_graphs
+        assert no_profit_req not in mc_ecg.var_node_flow
+        assert no_profit_req not in mc_ecg.var_edge_flow
+        assert no_profit_req not in mc_ecg.var_request_load
+        assert no_profit_req not in mc_ecg.var_node_flow
+        assert no_profit_req not in mc_ecg.var_node_flow
+
+        fs = mc_ecg.compute_fractional_solution()
+        # Check that the unprofitable request *is* in the fractional solution
+        assert isinstance(fs, solutions.FractionalScenarioSolution)
+        assert profit_req in fs.request_mapping
+        assert no_profit_req not in fs.request_mapping
+        assert sum([fs.mapping_flows[m.name] for m in fs.request_mapping[profit_req]]) == 1
+        assert not fs.request_mapping["test_req_2"]
+        for i in profit_req.nodes:
+            assert all(i in mapping.mapping_nodes for mapping in fs.request_mapping[profit_req])
+        for ij in profit_req.edges:
+            assert all(ij in mapping.mapping_edges for mapping in fs.request_mapping[profit_req])
 
     def test_can_get_fractional_solution(self):
         scenario = datamodel.Scenario("test_scenario", self.substrate, [self.request],
@@ -258,6 +295,7 @@ class TestCactusModelCreator:
                         "node_resource_factor": 0.25,
                         "edge_resource_factor": 5,
                         "normalize": True,
+                        "arbitrary_edge_orientations": False,
                         "profit_factor": 1.0,
                         "iterations": 10,
                         "max_cycles": 20,
