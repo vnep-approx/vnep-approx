@@ -36,7 +36,7 @@ random = Random("randomized_rounding")
 class RandomizedRoundingError(Exception): pass
 
 
-NUMBER_OF_ITERATIONS = 250
+NUMBER_OF_ITERATIONS = 1000
 
 RandomizedRoundingMetaData = namedtuple("RandomizedRoundingMetaData", ["time_preprocessing", "time_optimization", "time_postprocessing",
                                                                        "lost_flow_in_decomposition", "temporal_log", "status"])
@@ -103,11 +103,6 @@ class RandomizedRoundingTriumvirat(object):
         self.mc.init_model_creator()
 
     def compute_integral_solution(self, onlyloads=True):
-
-        self.mc.model.setParam("Method", 2)
-        self.mc.model.setParam("NumericFocus", 2)
-        self.mc.model.setParam("BarConvTol", 0.000000000000001)
-        self.mc.model.setParam("OptimalityTol", 0.001)
 
         self._fractional_solution = self.mc.compute_fractional_solution()
         if self._fractional_solution is None:
