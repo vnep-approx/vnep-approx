@@ -126,8 +126,8 @@ class TestCactusModelCreator:
         assert no_profit_req not in mc_ecg.var_node_flow
         assert no_profit_req not in mc_ecg.var_edge_flow
         assert no_profit_req not in mc_ecg.var_request_load
-        assert no_profit_req not in mc_ecg.var_node_flow
-        assert no_profit_req not in mc_ecg.var_node_flow
+        assert no_profit_req not in mc_ecg.var_embedding_decision
+        assert no_profit_req not in mc_ecg.var_request_load
 
         fs = mc_ecg.compute_fractional_solution()
         # Check that the unprofitable request *is* in the fractional solution
@@ -163,8 +163,8 @@ class TestCactusModelCreator:
         assert no_profit_req in mc_ecg.var_node_flow
         assert no_profit_req in mc_ecg.var_edge_flow
         assert no_profit_req in mc_ecg.var_request_load
-        assert no_profit_req in mc_ecg.var_node_flow
-        assert no_profit_req in mc_ecg.var_node_flow
+        assert no_profit_req in mc_ecg.var_embedding_decision
+        assert no_profit_req in mc_ecg.var_request_load
 
         fs = mc_ecg.compute_fractional_solution()
         # Check that the unprofitable request *is* in the fractional solution
