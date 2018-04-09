@@ -38,7 +38,7 @@ def compress_pickles():
     util.ExperimentPathHandler.initialize()
 
     with open(os.path.join(util.ExperimentPathHandler.INPUT_DIR,
-                           "sigmetrics_scenarios_17_01_12_solutions_randround_triumvirat.pickle"),
+                           "sigmetrics_redone_solutions_triumvirat.pickle"),
               "r") as f:
         sss = pickle.load(f)
 
@@ -55,7 +55,7 @@ def compress_pickles():
                 ex_param_solution_dict[ex_id] = compressed
 
     with open(os.path.join(util.ExperimentPathHandler.OUTPUT_DIR,
-                           "sigmetrics_scenarios_17_01_12_solutions_randround_triumvirat_reduced.pickle"),
+                           "sigmetrics_redone_solutions_triumvirat_reduced.pickle"),
               "w") as f:
         pickle.dump(sss, f)
 
