@@ -23,7 +23,9 @@ provides more explanation on how to generate scenarios and apply algorithms.
 ## Papers
 
 **[1]** Matthias Rost, Stefan Schmid: Service Chain and Virtual Network Embeddings: Approximations using Randomized Rounding. [CoRR abs/1604.02180](https://arxiv.org/abs/1604.02180) (2016)
+
 **[2]** Matthias Rost, Stefan Schmid: Virtual Network Embedding Approximations: Leveraging Randomized Rounding. IFIP Networking 2018. (see [arXiv](https://arxiv.org/abs/1803.03622) for the corresponding technical report)
+
 **[3]** Matthias Rost, Stefan Schmid: (FPT-)Approximation Algorithms for the Virtual Network Embedding Problem. [CoRR abs/1803.04452](https://arxiv.org/abs/1803.04452) (2018)
 
 
