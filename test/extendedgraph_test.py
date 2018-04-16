@@ -1,7 +1,7 @@
 __author__ = 'Tom Koch (tkoch@inet.tu-berlin.de)'
 
 from alib import datamodel
-from vnep_approx import extendedgraph
+from vnep_approx.deferred import extendedgraph
 
 
 def test_extendedgraph_generation():
