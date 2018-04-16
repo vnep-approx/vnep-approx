@@ -103,7 +103,7 @@ virtual environment (using **pip install spinx**) and executing the above from w
 
 # Contact
 
-If you have any questions, simply write a mail to mrost<AT>inet.tu-berlin<DOT>de.
+If you have any questions, simply write a mail to mrost(AT)inet.tu-berlin(DOT)de.
 
 # Acknowledgement
 
