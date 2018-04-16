@@ -41,7 +41,7 @@ such that the subfolders input/ output/ and log/ exist.
 
 **Note**: Our source was only tested on Linux (specifically Ubuntu 14/16).  
 
-# Installation
+# Overview
 
 To install **vnep_approx**, we provide a setup script. Simply execute from within vnep_approx's root directory: 
 
@@ -103,8 +103,7 @@ virtual environment (using **pip install spinx**) and executing the above from w
 
 # Contact
 
-If you have any questions, feel free to use Github to contact us.
-You can also simply write a mail to mrost<AT>inet.tu-berlin<DOT>de.
+If you have any questions, simply write a mail to mrost<AT>inet.tu-berlin<DOT>de.
 
 # Acknowledgement
 
