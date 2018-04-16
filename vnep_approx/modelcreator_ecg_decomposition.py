@@ -1,6 +1,6 @@
 # MIT License
 #
-# Copyright (c) 2016-2017 Matthias Rost, Elias Doehne, Tom Koch, Alexander Elvers
+# Copyright (c) 2016-2018 Matthias Rost, Elias Doehne, Tom Koch, Alexander Elvers
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -55,6 +55,15 @@ class DecompositionResult(modelcreator.AlgorithmResult):
 
 
 class ModelCreatorCactusDecomposition(modelcreator.AbstractEmbeddingModelCreator):
+    ''' The Gurobi model for computing decomposable solutions to the VNEP for cactus request graphs.
+
+        Our construction was first described in our publiction:
+        "Matthias Rost, Stefan Schmid: Service Chain and Virtual Network Embeddings: Approximations using Randomized Rounding. CoRR abs/1604.02180 (2016)"
+
+        Furthermore, the construction described henceforth is equivalent to the formulation described in our paper:
+        "Matthias Rost, Stefan Schmid: Virtual Network Embedding Approximations: Leveraging Randomized Rounding. CoRR abs/1803.03622 (2018)"
+    '''
+
     ALGORITHM_ID = "CactusDecomposition"
 
     def __init__(self, scenario, gurobi_settings=None, logger=None):

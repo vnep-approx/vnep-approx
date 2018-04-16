@@ -1,6 +1,6 @@
 # MIT License
 #
-# Copyright (c) 2016-2017 Matthias Rost, Elias Doehne, Tom Koch, Alexander Elvers
+# Copyright (c) 2016-2018 Matthias Rost, Elias Doehne, Tom Koch, Alexander Elvers
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -45,15 +45,9 @@ RandomizedRoundingSolutionData = namedtuple("RandomizedRoundingSolutionData", ["
                                                                                "max_edge_load",
                                                                                "time_to_round_solution"])
 
-RandomizedRoundingTriumviratReducedResult_January_2017 = namedtuple(
-    "RandomizedRoundingTriumviratReducedResult_January_2017",
-    ["meta_data", "best_feasible", ]
-)
-
-
-class RandomizedRoundingTriumviratResult(modelcreator.AlgorithmResult):
+class RandomizedRoundingTriumvirateResult(modelcreator.AlgorithmResult):
     def __init__(self, meta_data, collection_of_samples_with_violations, result_wo_violations, mdk_result, mdk_meta_data):
-        super(RandomizedRoundingTriumviratResult, self).__init__()
+        super(RandomizedRoundingTriumvirateResult, self).__init__()
         self.meta_data = meta_data
         self.collection_of_samples_with_violations = collection_of_samples_with_violations
         self.result_wo_violations = result_wo_violations
@@ -78,8 +72,15 @@ class RandomizedRoundingTriumviratResult(modelcreator.AlgorithmResult):
         return output_string
 
 
-class RandomizedRoundingTriumvirat(object):
-    ALGORITHM_ID = "RandomizedRoundingTriumvirat"
+class RandomizedRoundingTriumvirate(object):
+    ''' This class implements 3 different randomized rounding heuristics for obtaining integral mappings.
+        The first class of heuristics applies rounding directly. Either the solution minimizing resource violations or the
+        one maximizing the profit is returned.
+        The third heuristic
+
+    '''
+
+    ALGORITHM_ID = "RandomizedRoundingTriumvirate"
 
     def __init__(self, scenario, gurobi_settings=None, logger=None):
         self.scenario = scenario
@@ -130,7 +131,7 @@ class RandomizedRoundingTriumvirat(object):
                                                    temporal_log=mdk.temporal_log,
                                                    status=mdk.status)
 
-        self.solution = RandomizedRoundingTriumviratResult(meta_data=meta_data,
+        self.solution = RandomizedRoundingTriumvirateResult(meta_data=meta_data,
                                                            collection_of_samples_with_violations=collection_of_samples_with_violations,
                                                            result_wo_violations=result_wo_violations,
                                                            mdk_result=mdk_solution,
@@ -353,17 +354,6 @@ class DecompositionMDK(modelcreator.AbstractModelCreator):
             self.model.addConstr(at_most_one_decomp_expr, GRB.LESS_EQUAL, 1.0, name=constr_name)
 
         return
-        # NO IDEA WHY THIS DOES NOT WORK BUT THE ABVOE DOES
-
-        for (ntype, snode) in self.substrate_node_resources:
-            constr_name = "obey_capacity_nodes_{}".format((ntype, snode))
-            load_expr = LinExpr([(self.fractional_solution.mapping_loads[fractional_mapping.name][(ntype, snode)], self.var_embedding_variable[req][fractional_mapping])] for req in self.var_embedding_variable for fractional_mapping in self.var_embedding_variable[req] if self.fractional_solution.mapping_loads[fractional_mapping.name][(ntype, snode)] > 0.001)
-            self.model.addConstr(load_expr, GRB.LESS_EQUAL, float(self.scenario.substrate.node[snode]["capacity"][ntype]), name=constr_name)
-
-        for (u, v) in self.substrate_edge_resources:
-            constr_name = "obey_capacity_edges_{}".format((u, v))
-            load_expr = LinExpr([(self.fractional_solution.mapping_loads[fractional_mapping.name][(u, v)], self.var_embedding_variable[req][fractional_mapping])] for req in self.var_embedding_variable for fractional_mapping in self.var_embedding_variable[req] if self.fractional_solution.mapping_loads[fractional_mapping.name][(u, v)] > 0.001)
-            self.model.addConstr(load_expr, GRB.LESS_EQUAL, float(self.scenario.substrate.edge[(u, v)]["capacity"]), name=constr_name)
 
     def create_objective(self):
         objective = LinExpr()
@@ -373,7 +363,6 @@ class DecompositionMDK(modelcreator.AbstractModelCreator):
         self.model.setObjective(objective, GRB.MAXIMIZE)
 
     def compute_integral_solution(self):
-        # hard coded.. TODO
         self.model.setParam("LogToConsole", 0)
         self.model.setParam("TimeLimit", 120)
         self.model.setParam("Threads", 1)

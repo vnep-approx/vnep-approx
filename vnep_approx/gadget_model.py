@@ -1,6 +1,6 @@
 # MIT License
 #
-# Copyright (c) 2016-2017 Matthias Rost, Elias Doehne, Tom Koch, Alexander Elvers
+# Copyright (c) 2016-2018 Matthias Rost, Elias Doehne, Tom Koch, Alexander Elvers
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -46,6 +46,16 @@ class GadgetError(Exception):
 
 
 class GadgetModelCreator(modelcreator.AbstractEmbeddingModelCreator):
+    ''' Gurobi model creator for our implementation based on 'gadgets'. In particular, the formulation allows extended semantics:
+        it allows for decision requests, i.e. two outgoing edges of a virtual node represent choices and only one of the
+        outgoing edges (and its following subgraphs) are embedded.
+
+        This model is (in general) based on our paper:
+        "Guy Even, Matthias Rost, Stefan Schmid: An Approximation Algorithm for Path Computation and Function Placement in SDNs. SIROCCO 2016: 374-390"
+
+        Note however, that our implementation extends the above presented formulation by allowing to mix decision gadgets
+        with non-decision gadgets that may contain cycles.
+    '''
     def __init__(self,
                  scenario,
                  gurobi_settings=None,

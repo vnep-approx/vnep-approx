@@ -1,6 +1,6 @@
 # MIT License
 #
-# Copyright (c) 2016-2017 Matthias Rost, Elias Doehne, Tom Koch, Alexander Elvers
+# Copyright (c) 2016-2018 Matthias Rost, Elias Doehne, Tom Koch, Alexander Elvers
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -48,7 +48,10 @@ class CommutativityModelError(Exception):
 
 class CommutativityModelCreator(modelcreator.AbstractEmbeddingModelCreator):
     """
-    Model creator of the generalized commutativity model.
+    Model creator of the generalized commutativity model which yields LP Formulations for arbitrary request graphs.
+    A complete description of the underlying formulation and its decomposition algorithm can be found here in our paper
+    "Matthias Rost, Stefan Schmid: (FPT-)Approximation Algorithms for the Virtual Network Embedding Problem.
+    CoRR abs/1803.04452 (2018), https://arxiv.org/abs/1803.04452"
     """
 
     def __init__(self,
