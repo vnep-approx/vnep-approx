@@ -58,7 +58,24 @@ the sources are directly reflected in the installed package.
 
 We generally propose to install **vnep_approx** into a virtual environment (together with **alib**).
 
+# Usage
+
+You may either use our code via our API by importing the library or via our command line interface:
+
+```
+python -m vnep_approx.cli
+Usage: cli.py [OPTIONS] COMMAND [ARGS]...
+
+Options:
+  --help  Show this message and exit.
+
+Commands:
+  generate_scenarios
+  start_experiment
+```
+
 # Tests
+
 
 The test directory contains a large number of tests to check the correctness of our implementation and might also be useful
 to understand the code. 
