@@ -1,6 +1,6 @@
 # MIT License
 #
-# Copyright (c) 2016-2017 Matthias Rost, Elias Doehne, Tom Koch, Alexander Elvers
+# Copyright (c) 2016-2018 Matthias Rost, Elias Doehne, Tom Koch, Alexander Elvers
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -37,17 +37,6 @@ def cli():
 
 
 @cli.command()
-@click.argument('codebase_id')
-@click.argument('remote_base_dir', type=click.Path())
-@click.option('--local_base_dir', type=click.Path(exists=True), default=".")
-@click.argument('servers')
-@click.option('--extra', '-e', multiple=True, type=click.File())
-def deploy_code(codebase_id, remote_base_dir, local_base_dir, servers, extra):
-    print codebase_id, remote_base_dir, local_base_dir, servers, extra
-    alib.cli.f_deploy_code(codebase_id, remote_base_dir, local_base_dir, servers, extra)
-
-
-@cli.command()
 @click.argument('scenario_output_file')
 @click.argument('parameters', type=click.File('r'))
 @click.option('--threads', default=1)
@@ -69,16 +58,14 @@ def start_experiment(experiment_yaml,
     log_file = os.path.join(util.ExperimentPathHandler.LOG_DIR, "{}_experiment_execution.log".format(file_basename))
     util.initialize_root_logger(log_file)
 
-    sys.path.append(os.path.join(util.ExperimentPathHandler.CODE_DIR, "alib"))
-
     run_experiment.register_algorithm(
         modelcreator_ecg_decomposition.ModelCreatorCactusDecomposition.ALGORITHM_ID,
         modelcreator_ecg_decomposition.ModelCreatorCactusDecomposition
     )
 
     run_experiment.register_algorithm(
-        randomized_rounding_triumvirate.RandomizedRoundingTriumvirat.ALGORITHM_ID,
-        randomized_rounding_triumvirate.RandomizedRoundingTriumvirat
+        randomized_rounding_triumvirate.RandomizedRoundingTriumvirate.ALGORITHM_ID,
+        randomized_rounding_triumvirate.RandomizedRoundingTriumvirate
     )
 
     run_experiment.run_experiment(
