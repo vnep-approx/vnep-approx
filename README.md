@@ -8,12 +8,12 @@ Gurobi to compute convex combinations of valid mappings to apply **randomized ro
 **[modelcreator_ecg_decomposition.py](vnep_approx/modelcreator_ecg_decomposition.py)**.
 - A Linear Program based on our generalized extraction width concept for arbitrary requests based on our paper [3]: 
 **[commutativity_model.py](vnep_approx/commutativity_model.py)**
-- A Linear Program enabling the handling of decisions (outgoing edges represent choices): **[gadget_model.py](vnep_approx/gadget_model.py)**.
+- A Linear Program enabling the handling of decisions (outgoing edges represent choices) extending the formulation presented in [4]: **[gadget_model.py](vnep_approx/gadget_model.py)**.
 - A implementation of randomized rounding for cactus request graphs **[randomized_rounding_triumvirate.py](vnep_approx/randomized_rounding_triumvirate.py)**. 
 This randomized rounding procedure actually executed three different kinds of heuristics:
   - **Vanilla rounding**: simply round solutions and select the best one found within a fixed number of iterations (see [2]).
   - **Heuristic rounding**: perform the rounding while discarding selected (i.e. rounded) mappings whose addition would 
-  exceed resource capacities. Accordingly: this heuristic always yields feasible solutions.
+  exceed resource capacities. Accordingly: this heuristic always yields feasible solutions (see [2]).
   - **Multi-dimensional knapsack (MDK)**: given the decomposition into convex combinations of valid mappings for each request,
   the MDK computes the optimal rounding given all mapping possibilities found.
   
@@ -28,6 +28,7 @@ provides more explanation on how to generate scenarios and apply algorithms.
 
 **[3]** Matthias Rost, Stefan Schmid: (FPT-)Approximation Algorithms for the Virtual Network Embedding Problem. [CoRR abs/1803.04452](https://arxiv.org/abs/1803.04452) (2018)
 
+**[4]** Guy Even, Matthias Rost, Stefan Schmid: An Approximation Algorithm for Path Computation and Function Placement in SDNs. [SIROCCO 2016: 374-390](https://link.springer.com/chapter/10.1007%2F978-3-319-48314-6_24)
 
 # Dependencies and Requirements
 
