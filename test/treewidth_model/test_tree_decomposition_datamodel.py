@@ -1,18 +1,20 @@
 import pytest
-
-from vnep_approx import treewidth_model
-from test_data.request_test_data import create_test_request, request_groups
+from test_data.request_test_data import create_test_request, example_requests
 from test_data.tree_decomposition_test_data import (
     create_test_tree_decomposition,
     VALID_TREE_DECOMPOSITIONS,
     INVALID_TREE_DECOMPOSITION_INTERSECTION_PROPERTY,
     INVALID_TREE_DECOMPOSITIONS_NOT_A_TREE,
     INVALID_TREE_DECOMPOSITIONS,
+    POST_ORDER_TRAVERSALS,
+    CHECK_COMPATIBLE_MAPPINGS_VALID_EXAMPLES,
+    CHECK_COMPATIBLE_MAPPINGS_INVALID_EXAMPLES
 )
+from vnep_approx import treewidth_model
 
 
 @pytest.mark.parametrize("request_id",
-                         request_groups["all"])
+                         example_requests)
 def test_trivial_decomposition_is_always_valid(request_id):
     req = create_test_request(request_id)
     tree_decomp = treewidth_model.TreeDecomposition("test")
@@ -20,11 +22,11 @@ def test_trivial_decomposition_is_always_valid(request_id):
     assert tree_decomp.is_tree_decomposition(req)
 
 
-@pytest.mark.parametrize("tree_decomposition_dict",
+@pytest.mark.parametrize("request_id",
                          VALID_TREE_DECOMPOSITIONS)
-def test_hardcoded_decompositions_are_valid(tree_decomposition_dict):
-    req = create_test_request(request_id=tree_decomposition_dict["request_id"])
-    tree_decomp = create_test_tree_decomposition(tree_decomposition_dict)
+def test_hardcoded_decompositions_are_valid(request_id):
+    req = create_test_request(request_id=request_id)
+    tree_decomp = create_test_tree_decomposition(VALID_TREE_DECOMPOSITIONS[request_id])
     assert tree_decomp.is_tree_decomposition(req)
 
 
@@ -42,10 +44,10 @@ def test_invalid_decompositions_not_a_tree(tree_decomposition_dict):
     assert not tree_decomp._is_tree()
 
 
-@pytest.mark.parametrize("tree_decomposition_dict",
+@pytest.mark.parametrize("request_id",
                          VALID_TREE_DECOMPOSITIONS)
-def test_hardcoded_decompositions_can_convert_to_arborescence(tree_decomposition_dict):
-    tree_decomp = create_test_tree_decomposition(tree_decomposition_dict)
+def test_hardcoded_decompositions_can_convert_to_arborescence(request_id):
+    tree_decomp = create_test_tree_decomposition(VALID_TREE_DECOMPOSITIONS[request_id])
     arborescence = tree_decomp.convert_to_arborescence()
 
     # check node & edge sets
@@ -79,3 +81,24 @@ def test_converting_invalid_decomposition_to_arborescence_raises_valueerror(tree
     tree_decomp = create_test_tree_decomposition(tree_decomposition_dict)
     with pytest.raises(ValueError):
         tree_decomp.convert_to_arborescence()
+
+
+@pytest.mark.parametrize("traversal",
+                         POST_ORDER_TRAVERSALS)
+def test_post_order_traversal(traversal):
+    tree_decomp = create_test_tree_decomposition(VALID_TREE_DECOMPOSITIONS[traversal["request_id"]])
+    arborescence = tree_decomp.convert_to_arborescence(root=traversal["root"])
+
+    assert list(arborescence.post_order_traversal()) == traversal["order"]
+
+
+@pytest.mark.parametrize("mapping_pair_tuple",
+                         CHECK_COMPATIBLE_MAPPINGS_VALID_EXAMPLES)
+def test_check_compatible_mappings_valid_examples(mapping_pair_tuple):
+    assert treewidth_model.check_if_mappings_are_compatible(*mapping_pair_tuple)
+
+
+@pytest.mark.parametrize("mapping_pair_tuple",
+                         CHECK_COMPATIBLE_MAPPINGS_INVALID_EXAMPLES)
+def test_check_compatible_mappings_invalid_examples(mapping_pair_tuple):
+    assert not treewidth_model.check_if_mappings_are_compatible(*mapping_pair_tuple)

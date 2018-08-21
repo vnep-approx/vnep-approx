@@ -15,7 +15,7 @@ def create_test_request(request_id, reverse_edges=None):
         allowed = ["u", "v", "w"]
         if "assumed_allowed_nodes" in request_dict:
             allowed = request_dict["assumed_allowed_nodes"][node]
-        request.add_node(node, 1, "t1", allowed_nodes=allowed)
+        request.add_node(node, 1, "test_type", allowed_nodes=allowed)
     for edge in request_dict["edges"]:
         if edge in reverse_edges:
             edge = edge[1], edge[0]
@@ -40,6 +40,21 @@ def create_random_test_request(substrate, **kwargs):
         "test_req_random",
         raw_parameters,
         substrate,
+    )
+
+
+def create_test_substrate_large(**kwargs):
+    raw_parameters = dict(
+        topology="Geant2012",
+        node_types=["test_type"],
+        edge_capacity=10.0,
+        node_cost_factor=1.0,
+        node_capacity=10.0,
+        node_type_distribution=1,
+    )
+    raw_parameters.update(kwargs)
+    return scenariogeneration.TopologyZooReader().read_substrate(
+        raw_parameters,
     )
 
 
@@ -394,9 +409,4 @@ example_requests = {
     "dragon 1": DRAGON_1,
     "dragon 2": DRAGON_2,
     "dragon 3": DRAGON_3,
-}
-
-request_groups = {
-    "all": list(example_requests.keys()),
-    "webservicetest": ["cycle on cycle 4", "cycles crossing", "three branches", "dragon 1", "dragon 3"],
 }

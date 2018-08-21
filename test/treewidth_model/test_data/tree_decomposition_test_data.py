@@ -17,9 +17,8 @@ def create_test_tree_decomposition(td_dict):
     return tree_decomp
 
 
-VALID_TREE_DECOMPOSITIONS = [
-    dict(
-        request_id="simple path",
+VALID_TREE_DECOMPOSITIONS = {
+    "simple path": dict(
         bags={
             "bag_1": frozenset(["i1", "i2"]),
             "bag_2": frozenset(["i2", "i3"]),
@@ -28,8 +27,7 @@ VALID_TREE_DECOMPOSITIONS = [
             ("bag_1", "bag_2"),
         ],
     ),
-    dict(
-        request_id="cycle with nodes before and after",
+    "cycle with nodes before and after": dict(
         bags={
             "bag_1": frozenset(["i1", "i2"]),
             "bag_2": frozenset(["i2", "i3", "i4"]),
@@ -41,8 +39,7 @@ VALID_TREE_DECOMPOSITIONS = [
         ],
 
     ),
-    dict(
-        request_id="two cycles connected with single edge",
+    "two cycles connected with single edge": dict(
         bags={
             "bag_1": frozenset(["i1", "i2", "i3"]),
             "bag_2": frozenset(["i3", "i4"]),
@@ -54,8 +51,7 @@ VALID_TREE_DECOMPOSITIONS = [
 
         ],
     ),
-    dict(
-        request_id="three cycles connected directly",
+    "three cycles connected directly": dict(
         bags={
             "bag_1": frozenset(["i1", "i2", "i3", "i4"]),
             "bag_2": frozenset(["i4", "i5", "i6", "i7"]),
@@ -66,8 +62,7 @@ VALID_TREE_DECOMPOSITIONS = [
             ("bag_1", "bag_3"),
         ],
     ),
-    dict(  # derived by treedecomposition.com webservice
-        request_id="cycle on cycle 4",
+    "cycle on cycle 4": dict(
         bags={
             "bag_1": frozenset(["i2", "i5", "i7"]),
             "bag_2": frozenset(["i2", "i3", "i5"]),
@@ -85,8 +80,7 @@ VALID_TREE_DECOMPOSITIONS = [
             ("bag_2", "bag_6"),
         ],
     ),
-    dict(  # derived by treedecomposition.com webservice
-        request_id="cycles crossing",
+    "cycles crossing": dict(
         bags={
             "bag_1": frozenset(["i4", "i5", "i6"]),
             "bag_2": frozenset(["i2", "i3", "i4", "i5"]),
@@ -97,8 +91,7 @@ VALID_TREE_DECOMPOSITIONS = [
             ("bag_2", "bag_3"),
         ],
     ),
-    dict(  # derived by treedecomposition.com webservice
-        request_id="three branches",
+    "three branches": dict(
         bags={
             "bag_1": frozenset(["i1", "i4", "i5"]),
             "bag_2": frozenset(["i1", "i2", "i5"]),
@@ -109,8 +102,7 @@ VALID_TREE_DECOMPOSITIONS = [
             ("bag_1", "bag_3"),
         ],
     ),
-    dict(  # derived by treedecomposition.com webservice
-        request_id="dragon 1",
+    "dragon 1": dict(
         bags={
             "bag_1": frozenset(["i2", "i3", "i6"]),
             "bag_2": frozenset(["i1", "i2", "i3"]),
@@ -123,8 +115,7 @@ VALID_TREE_DECOMPOSITIONS = [
             ("bag_2", "bag_4"),
         ],
     ),
-    dict(  # derived by treedecomposition.com webservice
-        request_id="dragon 3",
+    "dragon 3": dict(
         bags={
             "bag_1": frozenset(["i1", "i4", "i6"]),
             "bag_2": frozenset(["i1", "i2", "i3", "i4"]),
@@ -137,7 +128,7 @@ VALID_TREE_DECOMPOSITIONS = [
             ("bag_2", "bag_4"),
         ],
     ),
-]
+}
 
 INVALID_TREE_DECOMPOSITION_INTERSECTION_PROPERTY = [
     dict(
@@ -192,17 +183,31 @@ PACE_INPUT_FORMAT = {
     "two cycles connected directly": "p tw 5 6\n1 2\n1 3\n2 3\n3 4\n3 5\n4 5",
 }
 
-TWO_CYCLES_CONNECTED_DIRECTLY = {
-    "nodes": [
-        "i1", "i2", "i3", "i4", "i5"
-    ],
-    "edges": [
-        ("i1", "i2"),
-        ("i1", "i3"),
-        ("i2", "i3"),
-        ("i3", "i4"),
-        ("i3", "i5"),
-        ("i4", "i5"),
-    ],
+POST_ORDER_TRAVERSALS = [
+    dict(
+        request_id="simple path",
+        root="bag_1",
+        order=["bag_2", "bag_1"],
+    ),
+    dict(
+        request_id="cycle on cycle 4",
+        root="bag_1",
+        order=["bag_3", "bag_6", "bag_2", "bag_4", "bag_5", "bag_1"],
+    ),
+    dict(
+        request_id="cycle on cycle 4",
+        root="bag_3",
+        order=["bag_4", "bag_5", "bag_1", "bag_6", "bag_2", "bag_3"],
+    ),
+]
 
-}
+CHECK_COMPATIBLE_MAPPINGS_VALID_EXAMPLES = [
+    ({1, 2, 3, 4}, ("a", "b", "c", "d"), {4, 3}, ("c", "d")),
+    ({1, 2, 3, 4}, ("a", "b", "c", "d"), {4, 3, 7}, ("c", "d", "e")),
+    ({1, 2}, ("a", "b"), {2, 1}, ("a", "b")),
+    ({1, 2, 3, 4}, ("a", "b", "c", "d"), {4, 3}, ("c", "d")),
+]
+
+CHECK_COMPATIBLE_MAPPINGS_INVALID_EXAMPLES = [
+    ({1, 2}, ("a", "b"), {2, 1}, ("b", "a",)),
+]

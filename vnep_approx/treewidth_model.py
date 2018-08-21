@@ -1,13 +1,13 @@
 import itertools
 import os
 import subprocess
+from collections import deque
 
 from gurobipy import GRB, LinExpr
 
-from alib import datamodel, modelcreator
+from alib import datamodel, modelcreator, solutions
 
-
-########### Some datastructures to represent tree decompositions ###########
+""" Some datastructures to represent tree decompositions """
 
 
 class UndirectedGraph(object):
@@ -16,14 +16,13 @@ class UndirectedGraph(object):
         self.nodes = set()
         self.edges = set()
 
+        self.neighbors = {}
+        self.incident_edges = {}
+
         # attribute dictionaries:
         self.graph = {}
         self.node = {}
         self.edge = {}
-        self.neighbors = {}
-        self.incident_edges = {}
-        self.removed_tree_nodes = set()
-        self.removed_contracted_nodes = set()
 
     def add_node(self, node):
         self.nodes.add(node)
@@ -59,9 +58,8 @@ class TreeDecomposition(UndirectedGraph):
     def __init__(self, name):
         super(TreeDecomposition, self).__init__(name)
 
-        self.node_bag_dict = {}
-        self.node_bags = set()
-        self.req_node_map = {}
+        self.node_bag_dict = {}  # map TD nodes to their bags
+        self.representative_map = {}  # map request nodes to representative TD nodes
 
     def add_node(self, node, node_bag=None):
         if not node_bag:
@@ -69,37 +67,52 @@ class TreeDecomposition(UndirectedGraph):
         if not isinstance(node_bag, frozenset):
             raise ValueError("Expected node bag as frozenset: {node_bag}")
         super(TreeDecomposition, self).add_node(node)
-        self.node_bags.add(node_bag)
         self.node_bag_dict[node] = node_bag
         for req_node in node_bag:
-            self.req_node_map.setdefault(req_node, set()).add(node)
+            if req_node not in self.representative_map:
+                self.representative_map[req_node] = node
 
-    def convert_to_arborescence(self, root_bag=None):
+    def convert_to_arborescence(self, root=None):
         if not self._verify_intersection_property() or not self._is_tree():
             raise ValueError("Cannot derive decomposition arborescence from invalid tree decomposition!")
-        if root_bag is None:
-            root_bag = next(iter(self.nodes))
-        arborescence = TDArborescence(self.name, root_bag)
-        q = {root_bag}
-        arborescence.add_node(root_bag)
+        if root is None:
+            root = next(iter(self.nodes))
+        arborescence = TDArborescence(self.name, root)
+        q = {root}
         visited = set()
         while q:
-            bag = q.pop()
-            visited.add(bag)
-            for other in self.get_neighbors(bag):
+            node = q.pop()
+            arborescence.add_node(node)
+            visited.add(node)
+            for other in self.get_neighbors(node):
                 if other not in visited:
                     arborescence.add_node(other)
-                    arborescence.add_edge(bag, other)
+                    arborescence.add_edge(node, other)
                     q.add(other)
         return arborescence
 
-    def get_representative(self, *args):
-        representatives = set(self.nodes)
+    @property
+    def width(self):
+        return max(len(bag) for bag in self.node_bag_dict)
+
+    def get_bag_intersection(self, t1, t2):
+        return self.node_bag_dict[t1] & self.node_bag_dict[t2]
+
+    def get_representative(self, req_node):
+        if req_node not in self.representative_map:
+            raise ValueError("Cannot find representative for unknown node {}!".format(req_node))
+        return self.representative_map[req_node]
+
+    def get_any_covering_td_node(self, *args):
+        covering_nodes = set(self.node_bag_dict.iterkeys())
         for i in args:
-            representatives &= self.req_node_map[i]
-        if not representatives:
-            return None
-        return sorted(representatives)[0]
+            if i not in self.representative_map:
+                raise ValueError("Cannot find representative for unknown node {}!".format(i))
+            covering_nodes &= {t for t in covering_nodes if i in self.node_bag_dict[t]}
+            if not covering_nodes:
+                print "Nodes {} have no covering node!".format(", ".join(str(i) for i in args))
+                return None
+        return next(iter(covering_nodes))
 
     def is_tree_decomposition(self, request):
         if not self._is_tree():
@@ -132,19 +145,25 @@ class TreeDecomposition(UndirectedGraph):
         return visited == set(self.nodes)
 
     def _verify_all_nodes_covered(self, req):
-        return set(self.req_node_map.keys()) == set(req.nodes)
+        return set(self.representative_map.keys()) == set(req.nodes)
 
     def _verify_all_edges_covered(self, req):
         for (i, j) in req.edges:
             # Check that there is some overlap in the sets of representative nodes:
-            if not (self.req_node_map[i] & self.req_node_map[j]):
-                return False
+            found_covering_bag = False
+            for node_bag in self.node_bag_dict.values():
+                if i in node_bag and j in node_bag:
+                    found_covering_bag = True
+                    break
+            if found_covering_bag:
+                break
         return True
 
     def _verify_intersection_property(self):
         # Check that subtrees induced by each request node are connected
-        for req_node, subtree_nodes in self.req_node_map.items():
-            start_node = next(iter(subtree_nodes))
+        for req_node in self.representative_map:
+            subtree_nodes = {t for (t, bag) in self.node_bag_dict.items() if req_node in bag}
+            start_node = self.get_representative(req_node)
             visited = set()
             q = {start_node}
             while q:
@@ -163,15 +182,35 @@ class TDArborescence(datamodel.Graph):
         super(TDArborescence, self).__init__(name)
         self.root = root
 
+    def add_node(self, node, **kwargs):
+        super(TDArborescence, self).add_node(
+            node, **kwargs
+        )
+
     def add_edge(self, tail, head, **kwargs):
-        if self.get_in_edges(head):
+        if self.get_in_neighbors(head):
             raise ValueError("Error: Arborescence must not contain confluences!")
         super(TDArborescence, self).add_edge(
             tail, head, bidirected=False
         )
 
+    def post_order_traversal(self):
+        visited = set()
+        q = [self.root]
+        while q:
+            t = q.pop()
+            unvisited_children = set(self.out_neighbors[t]) - visited
+            if not unvisited_children:  # leaf or children have all been handled
+                yield t
+                visited.add(t)
+            else:
+                q.append(t)  # put t back on stack, to revisit after its children
+                for c in sorted(unvisited_children, reverse=True):  # TODO: sorted only for testing
+                    q.append(c)
+        assert visited == self.nodes  # sanity check
 
-########### Computing tree decompositions ###########
+
+""" Computing tree decompositions """
 
 
 class TreeDecompositionComputation(object):
@@ -221,9 +260,9 @@ class TreeDecompositionComputation(object):
             ))
         return "\n".join(lines)
 
-    def _convert_result_format_to_tree_decomposition(self, result):
-        lines = result.split("\n")
-        result = TreeDecomposition("{}_TD".format(self.graph.name))
+    def _convert_result_format_to_tree_decomposition(self, computation_stdout):
+        lines = computation_stdout.split("\n")
+        td = TreeDecomposition("{}_TD".format(self.graph.name))
         # TODO: Do we need to use the header line for something?
         for line in lines[1:]:
             line = [w.strip() for w in line.split() if w]
@@ -231,25 +270,234 @@ class TreeDecompositionComputation(object):
                 continue
             elif line[0] == "b":
                 bag_id = self._get_bagid(line[1])
-                new_bag = frozenset([
+                bag = frozenset([
                     self.map_numeric_id_to_nodes[i] for i in line[2:]
                 ])
-                result.add_node(bag_id, new_bag)
+                td.add_node(bag_id, node_bag=bag)
             else:
                 assert len(line) == 2
                 i, j = line
-                result.add_edge(
+                td.add_edge(
                     self._get_bagid(i),
                     self._get_bagid(j),
                 )
-        return result
+        return td
 
     def _get_bagid(self, numeric_id):
         return "bag_{}".format(numeric_id)
 
 
-########### Modelcreator: Treewidth LP & Decomposition Algorithm ###########
+def compute_tree_decomposition(request):
+    return TreeDecompositionComputation(request).compute_tree_decomposition()
 
+
+""" Dynamic Program for Valid Mapping Problem Dyn-VMP """
+
+INFINITY = float("inf")
+
+
+class DynVMPAlgorithm(object):
+    """
+    Solve the Valid Mapping Problem using the DYN-VMP algorithm.
+    """
+
+    def __init__(self, request, substrate):
+        self.request = request
+        self.substrate = substrate
+        self.tree_decomposition = None
+        self.tree_decomposition_arb = None
+        self.cost_table = None
+        self.mapping_table = None
+
+    def preprocess_input(self):
+        self.substrate.initialize_shortest_paths_costs()
+        self.tree_decomposition = compute_tree_decomposition(self.request)
+        self.tree_decomposition_arb = self.tree_decomposition.convert_to_arborescence()
+
+    def compute_valid_mapping(self):
+        """
+        The code mostly follows the pseudocode of the DYN-VMP algorithm.
+
+        Node mappings are represented as follows: Since the mapped request nodes are always well defined, the
+        mapping is represented by a tuple of substrate nodes, where each substrate node in the tuple
+        is the mapped location of the request node at that index in the *sorted* list of request nodes that are mapped.
+
+        E.g.:
+        For node_bag frozenset(["j", "i", "k"]), the tuple  ("u", "w", "v") represents the mapping
+        { i -> u, j -> w, k -> v }
+
+        :return:
+        """
+        self.initialize_tables()
+
+        for t in self.tree_decomposition_arb.post_order_traversal():
+            bag_nodes = self.tree_decomposition.node_bag_dict[t]
+            for bag_mapping in self.cost_table[t].iterkeys():
+                ind_cost = self._induced_edge_cost(sorted(bag_nodes), bag_mapping)
+                if ind_cost != INFINITY:
+                    children_valid = True
+                    for t_child in self.tree_decomposition_arb.get_out_neighbors(t):
+                        best_child_bag_mapping = None
+                        best_child_mapping_cost = INFINITY
+                        child_bag_nodes = self.tree_decomposition.node_bag_dict[t_child]
+                        for child_bag_mapping, child_mapping_cost in self.cost_table[t_child].iteritems():
+                            if child_mapping_cost == INFINITY:
+                                continue
+                            elif child_mapping_cost > best_child_mapping_cost:
+                                """ 
+                                I think it is better to check 2nd condition in Line 13 
+                                before the for-loop condition in Line 12, as it is a simpler 
+                                operation
+                                """
+                                continue
+                            elif check_if_mappings_are_compatible(
+                                    bag_nodes, bag_mapping,
+                                    child_bag_nodes, child_bag_mapping
+                            ):
+                                best_child_bag_mapping = child_bag_mapping
+                                best_child_mapping_cost = child_mapping_cost
+
+                        if best_child_bag_mapping is not None:
+                            bag_index_offset = 0
+                            child_index_offset = 0
+                            for i_idx, i in enumerate(sorted(self.request.nodes)):
+                                if i in bag_nodes:
+                                    bag_index_offset += 1
+                                if i in child_bag_nodes:
+                                    if i not in bag_nodes:
+                                        child_mapped_node = best_child_bag_mapping[child_index_offset]
+                                        self.mapping_table[t][bag_mapping][i_idx - bag_index_offset] = child_mapped_node
+                                    child_index_offset += 1
+                                if i not in bag_nodes and i not in child_bag_nodes:
+                                    child_mapped_node = self.mapping_table[t_child][best_child_bag_mapping][i_idx - child_index_offset]
+                                    if child_mapped_node is not None:
+                                        self.mapping_table[t][bag_mapping][i_idx - bag_index_offset] = child_mapped_node
+                        else:
+                            # Check if mapping is not well-defined to avoid another indentation
+                            children_valid = False
+                            break
+
+                    if children_valid:
+                        # update cost table
+                        self.cost_table[t][bag_mapping] = self._induced_edge_cost(
+                            sorted(self.request.nodes - bag_nodes) + sorted(bag_nodes),
+                            self.mapping_table[t][bag_mapping] + list(bag_mapping),
+                        )
+
+        return self._extract_mapping_from_table()
+
+    def _extract_mapping_from_table(self):
+        t_root = self.tree_decomposition_arb.root
+        root_bag_nodes = self.tree_decomposition.node_bag_dict[t_root]
+        root_bag_mapping = self._find_best_root_bag_mapping()
+
+        if root_bag_mapping is None:
+            return None  # TODO Or is it better to return an empty mapping object?
+
+        # Convert to actual mapping...
+        mapping_name = construct_name_tw_lp("dynvmp_mapping", req_name=self.request.name)
+        result = solutions.Mapping(mapping_name, self.request, self.substrate, True)
+
+        # Map request nodes according to mapping table:
+        for i, u in zip(sorted(root_bag_nodes), root_bag_mapping):
+            result.map_node(i, u)
+        for i, u in zip(sorted(self.request.nodes - root_bag_nodes), self.mapping_table[t_root][root_bag_mapping]):
+            result.map_node(i, u)
+
+        # Map request edges:
+        for i, j in self.request.edges:
+            u = result.get_mapping_of_node(i)
+            v = result.get_mapping_of_node(j)
+            ij_demand = self.request.get_edge_demand((i, j))
+            result.map_edge((i, j), self.shortest_path(u, v, ij_demand))
+
+        return result
+
+    def _find_best_root_bag_mapping(self):
+        best_root_bag_mapping = None
+        best_root_mapping_cost = INFINITY
+        for root_bag_mapping, cost in self.cost_table[self.tree_decomposition_arb.root].iteritems():
+            if cost < best_root_mapping_cost:
+                best_root_mapping_cost = cost
+                best_root_bag_mapping = root_bag_mapping
+        return best_root_bag_mapping
+
+    def initialize_tables(self):
+        self.cost_table = {}
+        self.mapping_table = {}
+
+        for (t, bag_nodes) in self.tree_decomposition.node_bag_dict.iteritems():
+            self.cost_table[t] = {}
+            self.mapping_table[t] = {}
+            for node_bag_mapping in mapping_space(self.request, self.substrate, sorted(bag_nodes)):
+                self.cost_table[t][node_bag_mapping] = INFINITY
+                self.mapping_table[t][node_bag_mapping] = [None] * (len(self.request.nodes) - len(bag_nodes))
+
+    def _induced_edge_cost(self, req_nodes, sub_nodes):
+        """
+        Calculate minimal costs of mapping induced by partial node mapping.
+
+        :param req_nodes: list of request nodes that are in the partial node mapping
+        :param sub_nodes: list of substrate nodes to which the request nodes are mapped
+        :return:
+        """
+        # TODO: might not be the nicest way to do this
+        cost = 0
+        for i_idx, i in enumerate(req_nodes):
+            u = sub_nodes[i_idx]
+            if u is None:
+                continue  # ignore any nodes that are not mapped
+            cost += self.request.get_node_demand(i) * self.substrate.get_node_type_cost(
+                u, self.request.get_type(i)
+            )
+            for j_idx, j in enumerate(req_nodes):
+                v = sub_nodes[j_idx]
+                if v is None:
+                    continue
+                if (i, j) in self.request.edges:
+                    ij_cost = self.substrate.get_shortest_paths_cost(u, v)
+                    if ij_cost is None:
+                        return INFINITY
+                    cost += ij_cost
+        return cost
+
+    def shortest_path(self, start, target, min_capacity):
+        # TODO: could add this to the alib by extending Graph.initialize_shortest_paths_costs()
+        # Dijkstra algorithm (https://en.wikipedia.org/wiki/Dijkstra%27s_algorithm#Pseudocode)
+        distance = {node: INFINITY for node in self.substrate.nodes}
+        prev = {u: None for u in self.substrate.nodes}
+        distance[start] = 0
+        q = set(self.substrate.nodes)
+        while q:
+            u = min(q, key=lambda x: distance[x])
+            if u == target:
+                break
+            q.remove(u)
+            for uv in self.substrate.get_out_edges(u):
+                if self.substrate.get_edge_capacity(uv) < min_capacity:
+                    continue  # avoid using edges that are too small
+                v = uv[1]
+                new_dist = distance[u] + self.substrate.get_edge_cost(uv)
+                if new_dist < distance[v]:
+                    distance[v] = new_dist
+                    prev[v] = u
+        path = []
+        u = target
+        while u is not start:
+            path.append((prev[u], u))
+            u = prev[u]
+        return list(reversed(path))
+
+
+# TODO: inline & improve this function
+def check_if_mappings_are_compatible(bag_1, sub_nodes_1, bag_2, sub_nodes_2):
+    intersection = bag_1 & bag_2
+    intersection_mapping_1 = [u for (i, u) in zip(sorted(bag_1), sub_nodes_1) if i in intersection]
+    intersection_mapping_2 = [u for (i, u) in zip(sorted(bag_2), sub_nodes_2) if i in intersection]
+    return intersection_mapping_1 == intersection_mapping_2
+
+
+""" Modelcreator: Treewidth LP & Decomposition Algorithm """
 
 construct_name_tw_lp = modelcreator.build_construct_name([
     ("req_name", "req"),
@@ -284,8 +532,7 @@ class TreewidthModelCreator(modelcreator.AbstractEmbeddingModelCreator):
     def preprocess_input(self):
         for req in self.scenario.requests:
             if req.name not in self.tree_decompositions:
-                td_compute = TreeDecompositionComputation(req)
-                self.tree_decompositions[req.name] = td_compute.compute_tree_decomposition()
+                self.tree_decompositions[req.name] = compute_tree_decomposition(req)
             if not self.tree_decompositions[req.name].is_tree_decomposition(req):
                 raise ValueError("Tree decomposition failed for request {}!".format(req))
 
@@ -343,7 +590,7 @@ class TreewidthModelCreator(modelcreator.AbstractEmbeddingModelCreator):
         td = self.tree_decompositions[req.name]
         for ij in req.edges:
             i, j = ij
-            t_ij = td.get_representative(i, j)
+            t_ij = td.get_any_covering_td_node(i, j)
 
             t_ij_nodes = sorted(td.node_bag_dict[t_ij])
             i_idx = t_ij_nodes.index(i)
