@@ -210,6 +210,167 @@ class TDArborescence(datamodel.Graph):
         assert visited == self.nodes  # sanity check
 
 
+class NiceTDConversion(object): # TODO: Work in Progress
+    LEAF = "L"
+    JOIN = "J"
+    INTRO = "I"
+    FORGET = "F"
+
+    def __init__(self, request, initial_td=None):
+        if initial_td is None:
+            initial_td = compute_tree_decomposition(request)
+        self.initial_td = initial_td
+        self.request = request
+        self.nice_td = None
+
+    def initialize(self, root=None):
+        self.initial_arb = self.initial_td.convert_to_arborescence(root=root)
+        self.nice_td = TreeDecomposition("{}_nice".format(self.initial_td.name))
+        self.next_id = {
+            self.LEAF: 1,
+            self.JOIN: 1,
+            self.FORGET: 1,
+            self.INTRO: 1,
+        }
+        self.parent_dict = {}
+
+    def make_nice_tree_decomposition(self):
+        q = [self.initial_arb.root]
+        while q:
+            t = q.pop()
+            t_bag = self.initial_td.node_bag_dict[t]
+            self.nice_td.add_node(t, t_bag)
+            if t in self.parent_dict:
+                self.nice_td.add_edge(self.parent_dict[t], t)
+            children = self.initial_arb.get_out_neighbors(t)
+
+            num_children = len(children)
+            if num_children == 0:
+                t_bag = sorted(t_bag)
+                self._make_forget_chain(t, frozenset([t_bag[-1]]), self.LEAF)
+                continue
+
+            if num_children == 1:
+                connection_nodes = [t]  # connect directly to t
+            else:
+                # build binary tree of join nodes
+                connection_nodes = self._make_join_node_tree(t)
+            for parent, child in zip(connection_nodes, self.initial_arb.get_out_neighbors(t)):
+                child_bag = self.initial_td.node_bag_dict[child]
+                new_parent = self._make_forget_chain(parent, child_bag, self.FORGET)
+                new_parent = self._make_intro_chain(new_parent, child_bag, self.INTRO)
+                q.append(child)
+                self.parent_dict[child] = new_parent
+        return self.nice_td
+
+    def _make_join_node_tree(self, t):
+        num_children = len(self.initial_arb.get_out_neighbors(t))
+        t_bag = self.nice_td.node_bag_dict[t]
+        connection_nodes = deque([t])  # contains the leaves of the binary tree.
+        while len(connection_nodes) < num_children:
+            parent = connection_nodes.popleft()
+            leftchild = self._next_node_id(self.JOIN)
+            rightchild = self._next_node_id(self.JOIN)
+            self.nice_td.add_node(leftchild, t_bag)
+            self.nice_td.add_node(rightchild, t_bag)
+            self.nice_td.add_edge(parent, leftchild)
+            self.nice_td.add_edge(parent, rightchild)
+            connection_nodes.append(leftchild)
+            connection_nodes.append(rightchild)
+        connection_nodes = list(connection_nodes)
+        return connection_nodes
+
+    def _make_forget_chain(self, start, target_bag, target_node_type):
+        start_bag = self.nice_td.node_bag_dict[start]
+        nodes_to_forget = sorted(start_bag - target_bag)
+        parent = start
+        new_node = None
+        current_bag = set(start_bag)
+        while nodes_to_forget:
+            forget_node = nodes_to_forget.pop()
+            current_bag.remove(forget_node)
+            if len(current_bag) > 1:
+                new_node = self._next_node_id(self.FORGET)
+            else:
+                new_node = self._next_node_id(target_node_type)
+            self.nice_td.add_node(new_node, frozenset(current_bag))
+            self.nice_td.add_edge(parent, new_node)
+            parent = new_node
+        return new_node
+
+    def _make_intro_chain(self, start, target_bag, target_node_type):
+        start_bag = self.nice_td.node_bag_dict[start]
+        nodes_to_introduce = sorted(target_bag - start_bag)
+        parent = start
+        new_node = None
+        current_bag = set(start_bag)
+        while nodes_to_introduce:
+            next_intro_node = nodes_to_introduce.pop()
+            current_bag.add(next_intro_node)
+            if len(current_bag) > 1:
+                new_node = self._next_node_id(self.INTRO)
+            else:
+                new_node = self._next_node_id(target_node_type)
+            self.nice_td.add_node(new_node, frozenset(current_bag))
+            self.nice_td.add_edge(parent, new_node)
+            parent = new_node
+        return new_node
+
+    def _next_node_id(self, node_type):
+        result = "{}_{}".format(node_type, self.next_id[node_type])
+        self.next_id[node_type] += 1
+        return result
+
+
+def is_nice_tree_decomposition(tree_decomp, arborescence):
+    for t in tree_decomp.nodes:
+        children = arborescence.get_out_neighbors(t)
+        if len(children) == 0:
+            # leaf node: May only contain one bag node
+            if not _is_valid_leaf_node(tree_decomp, t):
+                print "Node {} is not a valid leaf node".format(t)
+                return False
+        elif len(children) == 1:
+            # introduce or forget node
+            if not _is_valid_intro_or_forget_node(tree_decomp, t, next(iter(children))):
+                print "Node {} is not a valid introduction or forget node".format(t)
+                return False
+        elif len(children) == 2:
+            # join node: all children must have same bag set
+            children = arborescence.get_out_neighbors(t)
+            if not _is_valid_join_node(tree_decomp, t, children):
+                print "Node {} is not a valid join node".format(t)
+                return False
+        else:
+            print "Node {} has too many neighbors".format(t)
+            return False
+    return True
+
+
+def _is_valid_leaf_node(tree_decomp, t):
+    return len(tree_decomp.node_bag_dict[t]) == 1
+
+
+def _is_valid_intro_or_forget_node(tree_decomp, t, child):
+    bag_neighbor = tree_decomp.node_bag_dict[child]
+    bag_t = tree_decomp.node_bag_dict[t]
+    num_forgotten = len(bag_neighbor - bag_t)
+    num_introduced = len(bag_t - bag_neighbor)
+    is_forget_node = num_introduced == 0 and num_forgotten == 1
+    is_intro_node = num_introduced == 1 and num_forgotten == 0
+    return is_intro_node or is_forget_node
+
+
+def _is_valid_join_node(tree_decomp, t, children):
+    if len(children) != 2:
+        return False
+    node_bag = tree_decomp.node_bag_dict[t]
+    c1 = children[0]
+    c2 = children[1]
+    return (node_bag == tree_decomp.node_bag_dict[c1] and
+            node_bag == tree_decomp.node_bag_dict[c2])
+
+
 """ Computing tree decompositions """
 
 

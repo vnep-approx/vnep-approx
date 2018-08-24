@@ -130,6 +130,73 @@ VALID_TREE_DECOMPOSITIONS = {
     ),
 }
 
+NICE_TREE_DECOMPOSITIONS = {
+    "simple path": dict(
+        root="leaf_1",
+        bags={
+            "leaf_1": frozenset(["i1"]),
+            "intro_1": frozenset(["i1", "i2"]),
+            "forget_1": frozenset(["i2"]),
+            "intro_2": frozenset(["i2", "i3"]),
+            "leaf_2": frozenset(["i3"]),
+        },
+        edges=[
+            ("leaf_1", "intro_1"),
+            ("intro_1", "forget_1"),
+            ("forget_1", "intro_2"),
+            ("intro_2", "leaf_2"),
+        ],
+    ),
+    "three cycles connected directly": dict(
+        root="leaf_1",
+        bags={
+            "leaf_1": frozenset(["i1"]),
+            "intro_1": frozenset(["i1", "i2"]),
+            "intro_2": frozenset(["i1", "i2", "i3"]),
+            "intro_3": frozenset(["i1", "i2", "i3", "i4"]),
+            "forget_1": frozenset(["i2", "i3", "i4"]),
+            "forget_2": frozenset(["i3", "i4"]),
+            "join_1": frozenset(["i4"]),
+            "join_2": frozenset(["i4"]),
+            "intro_4": frozenset(["i4", "i5"]),
+            "intro_5": frozenset(["i4", "i5", "i6"]),
+            "intro_6": frozenset(["i4", "i5", "i6", "i7"]),
+            "forget_4": frozenset(["i5", "i6", "i7"]),
+            "forget_5": frozenset(["i6", "i7"]),
+            "leaf_2": frozenset(["i7"]),
+            "join_3": frozenset(["i4"]),
+            "intro_8": frozenset(["i4", "i8"]),
+            "intro_9": frozenset(["i4", "i8", "i9"]),
+            "intro_10": frozenset(["i4", "i8", "i9", "i10"]),
+            "forget_6": frozenset(["i8", "i9", "i10"]),
+            "forget_7": frozenset(["i9", "i10"]),
+            "leaf_3": frozenset(["i10"]),
+        },
+        edges=[
+            ("leaf_1", "intro_1"),
+            ("intro_1", "intro_2"),
+            ("intro_2", "intro_3"),
+            ("intro_3", "forget_1"),
+            ("forget_1", "forget_2"),
+            ("forget_2", "join_1"),
+            ("join_1", "join_2"),
+            ("join_2", "intro_4"),
+            ("intro_4", "intro_5"),
+            ("intro_5", "intro_6"),
+            ("intro_6", "forget_4"),
+            ("forget_4", "forget_5"),
+            ("forget_5", "leaf_2"),
+            ("join_1", "join_3"),
+            ("join_3", "intro_8"),
+            ("intro_8", "intro_9"),
+            ("intro_9", "intro_10"),
+            ("intro_10", "forget_6"),
+            ("forget_6", "forget_7"),
+            ("forget_7", "leaf_3"),
+        ],
+    ),
+}
+
 INVALID_TREE_DECOMPOSITION_INTERSECTION_PROPERTY = [
     dict(
         # Re-introduce node i1 from earlier bag
