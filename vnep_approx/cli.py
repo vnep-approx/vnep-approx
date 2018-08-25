@@ -25,10 +25,11 @@ import os
 import sys
 
 import click
+import treewidth_model_experiments
 
 import alib.cli
 from alib import run_experiment, util
-from . import modelcreator_ecg_decomposition, randomized_rounding_triumvirate
+from . import modelcreator_ecg_decomposition, randomized_rounding_triumvirate, treewidth_model
 
 
 @click.group()
@@ -42,6 +43,24 @@ def cli():
 @click.option('--threads', default=1)
 def generate_scenarios(scenario_output_file, parameters, threads):
     alib.cli.f_generate_scenarios(scenario_output_file, parameters, threads)
+
+
+@cli.command()
+@click.argument('scenario_output_file')
+@click.argument('parameters', type=click.File('r'))
+@click.option('--threads', default=1)
+@click.option('--scenario_index_offset', default=0)
+def generate_treewidth_scenarios(scenario_output_file, parameters, threads, scenario_index_offset):
+    f_generate_treewidth_scenarios(scenario_output_file, parameters, threads, scenario_index_offset)
+
+
+def f_generate_treewidth_scenarios(scenario_output_file, parameter_file, threads, scenario_index_offset=0):
+    click.echo('Generate Scenarios for evaluation of the treewidth model')
+    util.ExperimentPathHandler.initialize()
+    file_basename = os.path.basename(parameter_file.name).split(".")[0].lower()
+    log_file = os.path.join(util.ExperimentPathHandler.LOG_DIR, "{}_scenario_generation.log".format(file_basename))
+    util.initialize_root_logger(log_file)
+    treewidth_model_experiments.generate_pickle_from_yml(parameter_file, scenario_output_file, threads, scenario_index_offset=scenario_index_offset)
 
 
 @cli.command()
@@ -66,6 +85,11 @@ def start_experiment(experiment_yaml,
     run_experiment.register_algorithm(
         randomized_rounding_triumvirate.RandomizedRoundingTriumvirate.ALGORITHM_ID,
         randomized_rounding_triumvirate.RandomizedRoundingTriumvirate
+    )
+
+    run_experiment.register_algorithm(
+        treewidth_model_experiments.EvaluateTreeDecomposition.ALGORITHM_ID,
+        treewidth_model_experiments.EvaluateTreeDecomposition
     )
 
     run_experiment.run_experiment(
