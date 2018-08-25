@@ -20,3 +20,12 @@ def test_tree_decomposition_computation_returns_valid_tree_decompositions(req_id
     td_comp = treewidth_model.TreeDecompositionComputation(req)
     tree_decomp = td_comp.compute_tree_decomposition()
     assert tree_decomp.is_tree_decomposition(req)
+
+@pytest.mark.parametrize("req_id", example_requests)
+def test_small_nice_decomposition(req_id):
+    req = create_test_request(req_id)
+    td_comp = treewidth_model.TreeDecompositionComputation(req)
+    tree_decomp = td_comp.compute_tree_decomposition()
+    assert tree_decomp.is_tree_decomposition(req)
+    sntd = treewidth_model.SmallSemiNiceTDArb(tree_decomp, req)
+    assert sntd.is_tree_decomposition(req)

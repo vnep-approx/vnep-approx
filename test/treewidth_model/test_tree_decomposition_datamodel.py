@@ -42,18 +42,19 @@ def test_nice_tree_decompositions_are_recognized(request_id):
     assert treewidth_model.is_nice_tree_decomposition(tree_decomp, arborescence)
 
 
-@pytest.mark.parametrize("request_id",
-                         ["simple path"])
-def test_nice_tree_decomposition_conversion(request_id):
-    req = create_test_request(request_id=request_id)
-
-    initial_td = treewidth_model.compute_tree_decomposition(req)
-    nice_td_generator = treewidth_model.NiceTDConversion(req, initial_td=initial_td)
-    root = sorted(initial_td.nodes)[0]
-    nice_td_generator.initialize(root=root)
-    nice_td = nice_td_generator.make_nice_tree_decomposition()
-    assert nice_td.is_tree_decomposition(req)
-    assert treewidth_model.is_nice_tree_decomposition(nice_td, nice_td.convert_to_arborescence(root))
+#DEFERRED
+# @pytest.mark.parametrize("request_id",
+#                          ["simple path"])
+# def test_nice_tree_decomposition_conversion(request_id):
+#     req = create_test_request(request_id=request_id)
+#
+#     initial_td = treewidth_model.compute_tree_decomposition(req)
+#     nice_td_generator = treewidth_model.NiceTDConversion(req, initial_td=initial_td)
+#     root = sorted(initial_td.nodes)[0]
+#     nice_td_generator.initialize(root=root)
+#     nice_td = nice_td_generator.make_nice_tree_decomposition()
+#     assert nice_td.is_tree_decomposition(req)
+#     assert treewidth_model.is_nice_tree_decomposition(nice_td, nice_td.convert_to_arborescence(root))
 
 
 @pytest.mark.parametrize("tree_decomposition_dict",

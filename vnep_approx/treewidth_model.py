@@ -46,6 +46,33 @@ class UndirectedGraph(object):
         self.edge[new_edge] = {}
         return new_edge
 
+    def remove_node(self, node):
+        if node not in self.nodes:
+            raise ValueError("Node not in graph.")
+
+        edges_to_remove = list(self.incident_edges[node])
+
+        for incident_edge in edges_to_remove:
+            edge_as_list = list(incident_edge)
+            self.remove_edge(edge_as_list[0], edge_as_list[1])
+
+        del self.incident_edges[node]
+        del self.neighbors[node]
+        self.nodes.remove(node)
+
+    def remove_edge(self, i, j):
+        old_edge = frozenset([i, j])
+        if i not in self.nodes or j not in self.nodes:
+            raise ValueError("Nodes not in graph!")
+        if old_edge not in self.edges:
+            raise ValueError("Edge not in graph!")
+        self.neighbors[i].remove(j)
+        self.neighbors[j].remove(i)
+        self.incident_edges[i].remove(old_edge)
+        self.incident_edges[j].remove(old_edge)
+        self.edges.remove(old_edge)
+        del self.edge[old_edge]
+
     def get_incident_edges(self, node):
         return self.incident_edges[node]
 
@@ -60,17 +87,52 @@ class TreeDecomposition(UndirectedGraph):
 
         self.node_bag_dict = {}  # map TD nodes to their bags
         self.representative_map = {}  # map request nodes to representative TD nodes
+        self.complete_request_node_to_tree_node_map = {}
 
     def add_node(self, node, node_bag=None):
+        ''' adds a node to the tree decomposition and stores the bag information; edges must be created externally.
+
+        :param node:
+        :param node_bag:
+        :return: None
+        '''
         if not node_bag:
             raise ValueError("Empty or unspecified node bag: {node_bag}")
         if not isinstance(node_bag, frozenset):
             raise ValueError("Expected node bag as frozenset: {node_bag}")
         super(TreeDecomposition, self).add_node(node)
         self.node_bag_dict[node] = node_bag
+        # edges_to_create = set()
         for req_node in node_bag:
             if req_node not in self.representative_map:
                 self.representative_map[req_node] = node
+            if req_node not in self.complete_request_node_to_tree_node_map:
+                self.complete_request_node_to_tree_node_map[req_node] = [node]
+            else:
+                self.complete_request_node_to_tree_node_map[req_node].append(node)
+
+        #     if req_node not in self.complete_request_node_to_tree_node_map:
+        #         self.complete_request_node_to_tree_node_map[req_node] = []
+        #     else:
+        #         for other_tree_node in self.complete_request_node_to_tree_node_map[req_node]:
+        #             edges_to_create.add(frozenset([other_tree_node,node]))
+        #         self.complete_request_node_to_tree_node_mao[req_node].append(node)
+        # for edge_to_create in edges_to_create:
+        #     edge_as_list = list(edge_to_create)
+        #     super(TreeDecomposition,self).add_edge(edge_as_list[0], edge_as_list[1])
+
+
+    def remove_node(self, node):
+        del self.node_bag_dict[node]
+
+
+        for req_node in self.complete_request_node_to_tree_node_map.keys():
+            if node in self.complete_request_node_to_tree_node_map[req_node]:
+                self.complete_request_node_to_tree_node_map[req_node].remove(node)
+            if self.representative_map[req_node] == node:
+                self.representative_map[req_node] = self.complete_request_node_to_tree_node_map[req_node][0]
+
+        super(TreeDecomposition, self).remove_node(node)
 
     def convert_to_arborescence(self, root=None):
         if not self._verify_intersection_property() or not self._is_tree():
@@ -208,6 +270,173 @@ class TDArborescence(datamodel.Graph):
                 for c in sorted(unvisited_children, reverse=True):  # TODO: sorted only for testing
                     q.append(c)
         assert visited == self.nodes  # sanity check
+
+class SmallSemiNiceTDArb(TreeDecomposition):
+
+    def __init__(self, original_td, request):
+        super(SmallSemiNiceTDArb, self).__init__("small_nice({})".format(original_td.name))
+        self.original_td = original_td
+        self.req = request
+        self._initialize_from_original_td()
+        self._make_small()
+        self._make_semi_nice()
+
+        self.out_neighbors = {}
+        self.in_neighbor = {}
+        self.root = None
+        self.post_order_traversal = None
+
+        self.node_classification = {}
+
+        self._create_arborescence()
+
+
+
+
+    #essentially just make a copy
+    def _initialize_from_original_td(self):
+        for node, node_bag in self.original_td.node_bag_dict.iteritems():
+            self.add_node(node, node_bag)
+        for edge in self.original_td.edges:
+            edge_as_list = list(edge)
+            self.add_edge(edge_as_list[0], edge_as_list[1])
+        # if not self.is_tree_decomposition():
+        #     raise ValueError("Something got lost!")
+
+    def _merge_nodes(self, node_to_remove, node_to_keep):
+
+            neighbors_of_removed_node = self.get_neighbors(node_to_remove)
+
+            if not node_to_keep in neighbors_of_removed_node:
+                raise ValueError("Seems as if the node_to_keep is not connected to the node_to_remove.")
+            neighbors_of_removed_node.remove(node_to_keep)
+
+            self.remove_node(node_to_remove)
+            for neighbor in neighbors_of_removed_node:
+                self.add_edge(neighbor, node_to_keep)
+
+    def _make_small(self):
+        progress = True
+        while progress:
+            progress = False
+            edges_to_check = list(self.edges)
+            for edge in edges_to_check:
+                edge_list = list(edge)
+                tail = edge_list[0]
+                head = edge_list[1]
+
+                tail_bag = self.node_bag_dict[tail]
+                head_bag = self.node_bag_dict[head]
+
+                if tail_bag.issubset(head_bag):
+                    self._merge_nodes(tail, head)
+                    progress = True
+                elif head_bag.issubset(tail_bag):
+                    self._merge_nodes(head, tail)
+                    progress = True
+                if progress:
+                    self.is_tree_decomposition(self.req)
+                    break
+
+    def _make_semi_nice(self):
+        ''' Connected node bags are connected by a novel node representing the intersection of the node bags.
+
+        :return:
+        '''
+
+        edges = list(self.edges)
+        for edge in edges:
+            edge_as_list = list(edge)
+            tail = edge_as_list[0]
+            head = edge_as_list[1]
+
+            tail_bag = self.node_bag_dict[tail]
+            head_bag = self.node_bag_dict[head]
+
+            intersection = tail_bag.intersection(head_bag)
+
+            if tail_bag == intersection or head_bag == intersection:
+                raise ValueError("Tree decomposition was not nice in the first place!")
+
+            internode = "bag_intersection_{}_{}".format(tail, head)
+            print("Splitting edge {} with repsective node bags {} and {} to introduce new node {} with bag {}".format(edge,
+                                                                                                                      tail_bag,
+                                                                                                                      head_bag,
+                                                                                                                      internode,
+                                                                                                                      intersection))
+
+
+            self.add_node(internode, intersection)
+
+            self.remove_edge(tail, head)
+            self.add_edge(tail, internode)
+            self.add_edge(internode, head)
+
+    def _create_arborescence(self):
+        #select root as bag having maximal bag size and maximal degree
+        best_root, max_size, max_degree = None, -1, -1
+        for node in self.nodes:
+            node_bag_size = len(self.node_bag_dict[node])
+            node_degree = len(self.incident_edges[node])
+
+            if node_bag_size > max_size or (node_bag_size == max_size and node_degree > max_degree):
+                max_size = node_bag_size
+                max_degree = node_degree
+                best_root = node
+
+        self.root = best_root
+        self.post_order_traversal = []
+        #root is set
+        visited = set()
+        queue = [self.root]
+        while len(queue) > 0:
+            current_node = queue.pop(0)
+            print("Handling node {}".format(current_node))
+            visited.add(current_node)
+            self.out_neighbors[current_node] = []
+            for edge in self.incident_edges[current_node]:
+                edge_as_list = list(edge)
+                other = None
+                if edge_as_list[0] == current_node:
+                    other = edge_as_list[1]
+                else:
+                    other = edge_as_list[0]
+
+                if other not in visited:
+                    self.in_neighbor[other] = current_node
+                    self.out_neighbors[current_node].append(other)
+                    queue.append(other)
+
+            self.post_order_traversal.append(current_node)
+
+        self.post_order_traversal = reversed(self.post_order_traversal)
+
+        print("Nodes:\n{}".format(self.nodes))
+        print("Edges:\n{}".format(self.edges))
+
+        for node in self.nodes:
+            if len(self.out_neighbors[node]) == 0:
+                self.node_classification[node] = 'L'
+            elif len(self.out_neighbors[node]) == 1:
+                out_neighbor = self.out_neighbors[node][0]
+                if self.node_bag_dict[out_neighbor].issubset(self.node_bag_dict[node]):
+                    self.node_classification[node] = 'I'
+                elif self.node_bag_dict[node].issubset(self.node_bag_dict[out_neighbor]):
+                    self.node_classification[node] = 'F'
+                else:
+                    raise ValueError("Don't know what's happening here!")
+            else:
+                self.node_classification[node] = 'J'
+                for out_neighbor in self.out_neighbors[node]:
+                    if not self.node_bag_dict[out_neighbor].issubset(self.node_bag_dict[node]):
+                        raise ValueError("Children should always be subsets of the join node!")
+
+
+
+
+
+
+
 
 
 class NiceTDConversion(object): # TODO: Work in Progress
