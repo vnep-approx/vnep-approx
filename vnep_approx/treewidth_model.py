@@ -616,7 +616,7 @@ class ShortestValidPathsComputer(object):
                         # self.valid_sedge_paths[edge_set_index][(num_id_to_snode_id[num_source_node], num_id_to_snode_id[num_target_node])] = None
                         self.edge_mapping_invalidities = True
 
-                converted_pred_dict = {self.num_id_to_snode_id[num_node] : self.num_id_to_snode_id[predecessor[num_node]] if predecessor[num_node] != -1 else None }
+                converted_pred_dict = {self.num_id_to_snode_id[num_node] : self.num_id_to_snode_id[predecessor[num_node]] if predecessor[num_node] != -1 else None for num_node in range(number_of_nodes)  }
                 self.valid_sedge_pred[edge_set_index][self.num_id_to_snode_id[num_source_node]] = converted_pred_dict
 
         request_edge_to_edge_set_id = self.valid_mapping_restriction_computer.get_reqedge_to_edgeset_id_mapping()
@@ -690,7 +690,7 @@ class OptimizedDynVMPNode(object):
                                                 current_reqnode_index+1
                                                 )
             else:
-                #if self.validity_array[current_value]:
+                #if self.validity_array[current_value]: #TODO somehow does not work when only including valid mapping indices
                 result_list.append(current_value)
 
     def get_node_mapping_based_on_index(self, mapping_index):
@@ -698,16 +698,16 @@ class OptimizedDynVMPNode(object):
             raise ValueError("Given index {} is out of bounds [0,...,{}].".format(mapping_index,
                                                                                   self.number_of_potential_node_mappings))
 
-        debug = False
-
-        if debug:
-            o_result = {}
-            for o_mapping_index, mapping in enumerate(itertools.product(*self.list_of_ordered_allowed_nodes)):
-                if o_mapping_index != mapping_index:
-                    continue
-                for reqnode_index, reqnode in enumerate(self.contained_request_nodes):
-                    o_result[reqnode] = mapping[reqnode_index]
-                break
+        # debug = False
+        # 
+        # if debug:
+        #     o_result = {}
+        #     for o_mapping_index, mapping in enumerate(itertools.product(*self.list_of_ordered_allowed_nodes)):
+        #         if o_mapping_index != mapping_index:
+        #             continue
+        #         for reqnode_index, reqnode in enumerate(self.contained_request_nodes):
+        #             o_result[reqnode] = mapping[reqnode_index]
+        #         break
 
 
         result_node_mapping = {}
@@ -719,14 +719,14 @@ class OptimizedDynVMPNode(object):
             result_node_mapping[request_node] = snode
             mapping_index /= number_of_allowed_nodes_for_request_node
 
-        if debug:
-            print "Naively found vs. intelligently found:\n\t{}\n\t{}".format(result_node_mapping, o_result)
-
-            if set(result_node_mapping.keys()) != set(o_result.keys()):
-                raise ValueError("THis is bad!")
-            for reqnode in result_node_mapping.keys():
-                if result_node_mapping[reqnode] != o_result[reqnode]:
-                    raise ValueError("Really bad!")
+        # if debug:
+        #     print "Naively found vs. intelligently found:\n\t{}\n\t{}".format(result_node_mapping, o_result)
+        # 
+        #     if set(result_node_mapping.keys()) != set(o_result.keys()):
+        #         raise ValueError("THis is bad!")
+        #     for reqnode in result_node_mapping.keys():
+        #         if result_node_mapping[reqnode] != o_result[reqnode]:
+        #             raise ValueError("Really bad!")
 
         return result_node_mapping
 
@@ -772,20 +772,12 @@ class OptimizedDynVMPNode(object):
 
 
     def _initialize_validity_array(self):
-        # print "Initializing validity array"
         if self.svpc.edge_mapping_invalidities:
 
             for (reqedge_source, reqedge_target) in self.contained_request_edges:
 
-                # print "Handling edge {}".format((reqedge_source, reqedge_target))
-
                 for mapping_of_source, mapping_of_target in itertools.product(self.allowed_nodes[reqedge_source],
                                                                     self.allowed_nodes[reqedge_target]):
-
-                    # print "\tmappings: {} {}".format(mapping_of_source, mapping_of_target)
-                    # print "\t\tcorresponding costs: {}".format(
-                    #     self.svpc.valid_sedge_costs[(reqedge_source, reqedge_target)][
-                    #         (mapping_of_source, mapping_of_target)])
                     if np.isnan(self.svpc.valid_sedge_costs[(reqedge_source, reqedge_target)][(mapping_of_source, mapping_of_target)]):
 
 
@@ -839,23 +831,25 @@ class OptimizedDynVMPNode(object):
                     indices = self.get_indices_of_mappings_under_restrictions({reqnode: snode})
                     self.local_node_cost_weights[self.optdynvmp_parent.sorted_snode_index[snode], indices] += self.request.get_node_demand(reqnode)
 
+            self.temp_edge_cost_update_table = {edge_set_id : None for edge_set_id in range(self.vmrc.get_number_of_different_edge_sets())}
+
             for reqedge in self.forgotten_virtual_elements_out_neigbor[1]:
                 req_source, req_target = reqedge
 
                 edge_set_index_of_edge = reqedge_to_edge_set_id_mapping[reqedge]
-                current_edge_cost_weights = None
 
                 if self.local_edge_cost_weights[edge_set_index_of_edge] is None:
                     current_edge_cost_weights = np.full((number_of_nodes * number_of_nodes, self.number_of_potential_node_mappings), 0.0, dtype=np.float32)
                     self.local_edge_cost_weights[edge_set_index_of_edge] = current_edge_cost_weights
                 else:
                     current_edge_cost_weights = self.local_edge_cost_weights[edge_set_index_of_edge]
+                    temp_edge_cost_update_table = self.temp_edge_cost_update_table[edge_set_index_of_edge]
 
                 for source_mapping, target_mapping in itertools.product(self.allowed_nodes[req_source], self.allowed_nodes[req_target]):
                     indices = self.get_indices_of_mappings_under_restrictions({req_source: source_mapping,
                                                                                req_target: target_mapping})
-                    current_edge_cost_weights[self.optdynvmp_parent.sedge_pair_index[(source_mapping, target_mapping)], indices] += self.request.get_edge_demand(reqedge)
 
+                    current_edge_cost_weights[self.optdynvmp_parent.sedge_pair_index[(source_mapping, target_mapping)], indices] += self.request.get_edge_demand(reqedge)
 
         if self.nodetype == NodeType.Forget:
             if len(self.in_neighbors) != 1:
@@ -928,19 +922,37 @@ class OptimizedDynVMPNode(object):
 
 class OptimizedDynVMP(object):
 
-    def __init__(self, substrate, request, ssntda, initial_node_cost_value=1, initial_edge_cost_value=1):
+    def __init__(self, substrate, request, ssntda, initial_snode_costs = None, initial_sedge_costs = None):
         self.substrate = substrate
         self.request = request
         if not isinstance(ssntda, SmallSemiNiceTDArb):
             raise ValueError("The Optimized DYNVMP Algorithm expects a small-semi-nice-tree-decomposition-arborescence")
         self.ssntda = ssntda
 
-
-        self.snode_costs = {snode: initial_node_cost_value for snode in substrate.nodes}
-        self.sedge_costs = {sedge: initial_edge_cost_value for sedge in substrate.edges}
+        self._initialize_costs(initial_snode_costs, initial_sedge_costs)
 
         self.vmrc = ValidMappingRestrictionComputer(substrate=substrate, request=request)
         self.svpc = ShortestValidPathsComputer(substrate=substrate, request=request, valid_mapping_restriction_computer=self.vmrc, edge_costs=self.sedge_costs)
+
+    def _initialize_costs(self, initial_snode_costs, initial_sedge_costs):
+        if initial_snode_costs is None:
+            self.snode_costs = {snode: 1.0 for snode in self.substrate.nodes}
+        else:
+            self.snode_costs = {snode: initial_snode_costs[snode] for snode in initial_snode_costs.keys()}
+
+        if initial_sedge_costs is None:
+            self.sedge_costs = {sedge: 1.0 for sedge in self.substrate.edges}
+        else:
+            self.sedge_costs = {sedge: initial_sedge_costs[sedge] for sedge in initial_sedge_costs.keys()}
+
+        self._max_demand = max([self.request.get_node_demand(reqnode) for reqnode in self.request.nodes] +
+                               [self.request.get_edge_demand(reqedge) for reqedge in self.request.edges])
+
+        self._max_cost = max(
+            [cost for cost in self.snode_costs.values()] + [cost for cost in self.sedge_costs.values()])
+
+        self._mapping_cost_bound = self._max_demand * self._max_cost * 2.0 * len(self.request.edges) * len(self.substrate.edges)
+
 
 
     def initialize_data_structures(self):
@@ -964,11 +976,9 @@ class OptimizedDynVMP(object):
             self.edge_costs_array.append(np.full(number_of_nodes*number_of_nodes, 0.0, dtype=np.float32))
             for node_pair_index, (snode_1, snode_2) in enumerate(itertools.product(self.sorted_snodes, self.sorted_snodes)):
                 if np.isnan(self.svpc.valid_sedge_costs[edge_set_index][(snode_1, snode_2)]):
-                    self.edge_costs_array[edge_set_index][node_pair_index] = 10000# need to fix that
+                    self.edge_costs_array[edge_set_index][node_pair_index] = self._mapping_cost_bound
                 else:
                     self.edge_costs_array[edge_set_index][node_pair_index] = self.svpc.valid_sedge_costs[edge_set_index][(snode_1, snode_2)]
-
-
 
         self.dynvmp_tree_nodes = {}
         for t in self.ssntda.post_order_traversal:
@@ -984,6 +994,41 @@ class OptimizedDynVMP(object):
             self.dynvmp_tree_nodes[t].compute_costs_based_on_children()
 
     def recover_mapping(self):
+        root_cost, reqnode_mappings = self._recover_node_mapping()
+        if root_cost is None:
+            return None, None
+
+        reqedge_mappings = {}
+        for reqedge in self.request.edges:
+            reqedge_mappings[reqedge] = self._reconstruct_edge_mapping(reqedge, reqnode_mappings[reqedge[0]], reqnode_mappings[reqedge[1]])
+
+        result_mapping = solutions.Mapping("dynvmp_mapping_{}".format(self.request.name),
+                                    self.request,
+                                    self.substrate,
+                                    True)
+
+        for reqnode, mapping_thereof in reqnode_mappings.iteritems():
+            result_mapping.map_node(reqnode, mapping_thereof)
+        for reqedge, mapping_thereof in reqedge_mappings.iteritems():
+            result_mapping.map_edge(reqedge, mapping_thereof)
+
+        print "Result of cost {} is...\n\t{}".format(root_cost, result_mapping)
+        return root_cost, result_mapping
+
+    def _reconstruct_edge_mapping(self, reqedge, source_mapping, target_mapping):
+        reqedge_predecessors = self.svpc.valid_sedge_pred[reqedge][source_mapping]
+        print "predecessors: {}".format(reqedge_predecessors)
+
+        u = target_mapping
+        path = []
+        while u != source_mapping:
+            pred = reqedge_predecessors[u]
+            path.append((pred, u))
+            u = pred
+        path = list(reversed(path))
+        return path
+
+    def _recover_node_mapping(self):
         print "Trying to recover mapping."
         fixed_node_mappings = {}
         root_cost = None
@@ -991,66 +1036,36 @@ class OptimizedDynVMP(object):
 
             print "\n\nFixed mappings are {}".format(fixed_node_mappings)
 
-            #find mapping of least cost
+            # find mapping of least cost
             dynvmp_treenode = self.dynvmp_tree_nodes[treenode]
 
-            potential_node_mapping_indices = dynvmp_treenode.get_indices_of_mappings_under_restrictions(fixed_node_mappings)
+            potential_node_mapping_indices = dynvmp_treenode.get_indices_of_mappings_under_restrictions(
+                fixed_node_mappings)
             corresponding_node_mapping = None
-
-            debug_dict = {debug_mapping_index : dynvmp_treenode.get_node_mapping_based_on_index(debug_mapping_index)
-                          for debug_mapping_index in potential_node_mapping_indices}
-            # print "potential mappings are: {}.... ".format(debug_dict)
-            # for key, value in debug_dict.iteritems():
-            #     print "{} yields..".format(key)
-            #     for value_key, value_value in value.iteritems():
-            #         print "\t{} --> {}".format(value_key, value_value)
 
             try:
                 best_mapping_index = np.nanargmin(dynvmp_treenode.mapping_costs[potential_node_mapping_indices])
 
-                # debug_mapping = dynvmp_treenode.get_node_mapping_based_on_index(potential_node_mapping_indices[best_mapping_index])
-                # print "mapping {} achieves minimal cost".format(potential_node_mapping_indices[best_mapping_index])
-                # for value_key, value_value in debug_mapping.iteritems():
-                #     print "\t{} --> {}".format(value_key, value_value)
-
                 if dynvmp_treenode.nodetype == NodeType.Root:
                     root_cost = dynvmp_treenode.mapping_costs[potential_node_mapping_indices[best_mapping_index]]
+                    if root_cost >= self._mapping_cost_bound:
+                        print "this cannot be ever optimal!"
+                        return None, None
                     print "Optimal cost at root is: {}".format(root_cost)
-                corresponding_node_mapping = dynvmp_treenode.get_node_mapping_based_on_index(potential_node_mapping_indices[best_mapping_index])
+                corresponding_node_mapping = dynvmp_treenode.get_node_mapping_based_on_index(
+                    potential_node_mapping_indices[best_mapping_index])
             except ValueError:
-                import traceback
-                # print "Potential node mappings are: {}".format(potential_node_mapping_indices)
-                # print "Corresponding cost values are {}".format(
-                #     dynvmp_treenode.mapping_costs[potential_node_mapping_indices])
-
-                print "Costs are..."
-                print self.node_costs_array
-                print self.edge_costs_array
-
-                for o_t in self.ssntda.post_order_traversal:
-                    valid_entries = np.count_nonzero(self.dynvmp_tree_nodes[o_t].validity_array)
-                    nan_entries = np.count_nonzero(np.isnan(self.dynvmp_tree_nodes[o_t].mapping_costs))
-                    print "Node {} of type {} has {} many valid entries and {} many nan entries (of {})".format(o_t,
-                                                                                                                self.dynvmp_tree_nodes[o_t].nodetype,
-                                                                                                                valid_entries,
-                                                                                                                nan_entries,
-                                                                                                                np.shape(self.dynvmp_tree_nodes[o_t].validity_array))
-
-
-                traceback.print_exc()
-                print "Could not extend it :("
-                return None
-
-
-
+                # no mapping could be found
+                return None, None
 
             for request_node, substrate_node in corresponding_node_mapping.iteritems():
                 if request_node in fixed_node_mappings:
                     if fixed_node_mappings[request_node] != substrate_node:
-                        raise ValueError("Extracted local (optimal) mapping does not aggree with the previously set node mappings:\n\n"
-                                         "\tfixed_mappings: {}\n"
-                                         "\tcurrent mapping: {}".format(fixed_node_mappings,
-                                                                        corresponding_node_mapping))
+                        raise ValueError(
+                            "Extracted local (optimal) mapping does not aggree with the previously set node mappings:\n\n"
+                            "\tfixed_mappings: {}\n"
+                            "\tcurrent mapping: {}".format(fixed_node_mappings,
+                                                           corresponding_node_mapping))
                 else:
                     fixed_node_mappings[request_node] = substrate_node
 
