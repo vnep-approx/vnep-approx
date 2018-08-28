@@ -986,6 +986,7 @@ class OptimizedDynVMP(object):
     def recover_mapping(self):
         print "Trying to recover mapping."
         fixed_node_mappings = {}
+        root_cost = None
         for treenode in self.ssntda.pre_order_traversal:
 
             print "\n\nFixed mappings are {}".format(fixed_node_mappings)
@@ -1013,7 +1014,8 @@ class OptimizedDynVMP(object):
                 #     print "\t{} --> {}".format(value_key, value_value)
 
                 if dynvmp_treenode.nodetype == NodeType.Root:
-                    print "Optimal cost at root is: {}".format(dynvmp_treenode.mapping_costs[potential_node_mapping_indices[best_mapping_index]])
+                    root_cost = dynvmp_treenode.mapping_costs[potential_node_mapping_indices[best_mapping_index]]
+                    print "Optimal cost at root is: {}".format(root_cost)
                 corresponding_node_mapping = dynvmp_treenode.get_node_mapping_based_on_index(potential_node_mapping_indices[best_mapping_index])
             except ValueError:
                 import traceback
@@ -1052,7 +1054,7 @@ class OptimizedDynVMP(object):
                 else:
                     fixed_node_mappings[request_node] = substrate_node
 
-        return fixed_node_mappings
+        return root_cost, fixed_node_mappings
 
     def reinitialize(self, new_node_costs, new_edge_costs):
         pass
