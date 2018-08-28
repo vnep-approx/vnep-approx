@@ -257,18 +257,15 @@ def test_opt_dynvmp_and_classic_mcf_agree_for_unambiguous_scenario(
     opt_dynvmp.sedge_costs = {uv: sub.edge[uv]["cost"] for uv in sub.edges}
     opt_dynvmp.svpc.edge_costs = {uv: sub.edge[uv]["cost"] for uv in sub.edges}
 
-    try:
-        opt_dynvmp.initialize_data_structures()
-        opt_dynvmp.compute_solution()
-    except OSError as e:
-        assert "memory" in str(e)
-        print "Aborted due to memory error"
-        return
-    dynvmp_result = opt_dynvmp.recover_mapping()
-    if dynvmp_result is not None:  # solution exists
-        root_cost, mapping = dynvmp_result
+    opt_dynvmp.initialize_data_structures()
+    opt_dynvmp.compute_solution()
+
+    root_cost, mapping = opt_dynvmp.recover_mapping()
+    if root_cost is not None:  # solution exists
+        assert gurobi_solution is not None
         gurobi_obj = gurobi_solution.status.objValue
         assert abs(root_cost - gurobi_obj) <= 0.0001
-        assert mapping == gurobi_solution.solution.request_mapping[req].mapping_nodes
+        assert mapping.mapping_nodes == gurobi_solution.solution.request_mapping[req].mapping_nodes
+        assert mapping.mapping_edges == gurobi_solution.solution.request_mapping[req].mapping_edges
     else:
         assert gurobi_solution is None
