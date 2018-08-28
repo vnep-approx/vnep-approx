@@ -15,7 +15,6 @@ random.seed(0)
 
 
 # TEST Valid Mapping Restriction Computer
-@pytest.mark.skip()
 @pytest.mark.parametrize("request_id",
                          example_requests)
 def test_valid_mapping_restriction_computer(request_id):
@@ -90,7 +89,6 @@ def test_valid_mapping_restriction_computer(request_id):
 
 
 # TEST Valid Shortest Path Computer
-@pytest.mark.skip()
 @pytest.mark.parametrize("request_id",
                          example_requests)
 def test_shortest_valid_paths_computer(request_id):
@@ -143,7 +141,6 @@ def test_shortest_valid_paths_computer(request_id):
 
 
 # TEST OptimizedDynVMP
-@pytest.mark.skip()
 @pytest.mark.parametrize("request_id",
                          example_requests_small)
 def test_opt_dynvmp(request_id):
@@ -264,7 +261,7 @@ def test_opt_dynvmp_and_classic_mcf_agree_for_unambiguous_scenario(
         opt_dynvmp.initialize_data_structures()
         opt_dynvmp.compute_solution()
     except OSError as e:
-        assert "memory" in e
+        assert "memory" in str(e)
         print "Aborted due to memory error"
         return
     dynvmp_result = opt_dynvmp.recover_mapping()
