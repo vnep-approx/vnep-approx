@@ -1,7 +1,10 @@
 import pytest
 from vnep_approx import treewidth_model
 
-from alib import datamodel
+import numpy as np
+
+from alib import mip
+from alib import datamodel as dm
 from test_data.request_test_data import create_test_request, example_requests, example_requests_small, create_test_substrate_large
 from test_data.substrate_test_data import create_test_substrate
 
@@ -10,19 +13,20 @@ import time
 
 random.seed(0)
 
-# TEST Valid Mapping Restriction Computer
 
+# TEST Valid Mapping Restriction Computer
+@pytest.mark.skip()
 @pytest.mark.parametrize("request_id",
                          example_requests)
 def test_valid_mapping_restriction_computer(request_id):
     req = create_test_request(request_id, set_allowed_nodes=False)
     sub = create_test_substrate_large()
-    #print(req)
-    #print(sub)
+    # print(req)
+    # print(sub)
     vmrc = treewidth_model.ValidMappingRestrictionComputer(sub, req)
     vmrc.compute()
 
-    #assert that all nodes and all edges may be mapped anywhere...
+    # assert that all nodes and all edges may be mapped anywhere...
     substrate_node_set = set(sub.nodes)
     substrate_edge_set = set(sub.edges)
 
@@ -34,7 +38,7 @@ def test_valid_mapping_restriction_computer(request_id):
         allowed_edges = vmrc.get_allowed_sedge_set(reqedge)
         assert allowed_edges == substrate_edge_set
 
-    #set substrate node and edge capacities randomly
+    # set substrate node and edge capacities randomly
     for snode in sub.nodes:
         sub.node[snode]['capacity'] = 2.0 * random.random()
 
@@ -56,11 +60,10 @@ def test_valid_mapping_restriction_computer(request_id):
                                                if sub.get_edge_capacity(sedge) < req.get_edge_demand(reqedge)])
         assert sedges_with_not_enough_capacity.union(set(allowed_edges)) == substrate_edge_set
 
-
     snode_list = list(sub.nodes)
     sedge_list = list(sub.edges)
 
-    #now additionally also introduce some mapping restrictions
+    # now additionally also introduce some mapping restrictions
     for reqnode in req.nodes:
         random.shuffle(snode_list)
         req.set_allowed_nodes(reqnode, snode_list[0:random.randint(1, len(snode_list))])
@@ -87,21 +90,20 @@ def test_valid_mapping_restriction_computer(request_id):
 
 
 # TEST Valid Shortest Path Computer
-
+@pytest.mark.skip()
 @pytest.mark.parametrize("request_id",
                          example_requests)
 def test_shortest_valid_paths_computer(request_id):
     req = create_test_request(request_id, set_allowed_nodes=False)
     sub = create_test_substrate_large()
-    #print(req)
-    #print(sub)
+    # print(req)
+    # print(sub)
     vmrc = treewidth_model.ValidMappingRestrictionComputer(sub, req)
     vmrc.compute()
 
+    # uniform edge costs
 
-    #uniform edge costs
-
-    edge_costs = {sedge : 1.0 for sedge in sub.edges}
+    edge_costs = {sedge: 1.0 for sedge in sub.edges}
 
     svpc = treewidth_model.ShortestValidPathsComputer(sub, req, vmrc, edge_costs)
 
@@ -115,16 +117,15 @@ def test_shortest_valid_paths_computer(request_id):
                 else:
                     assert svpc.valid_sedge_costs[reqedge][(snode_source, snode_target)] >= 1
 
-    #random edge costs
+    # random edge costs
 
-    edge_costs = {sedge : max(1,1000.0 * random.random()) for sedge in sub.edges}
+    edge_costs = {sedge: max(1, 1000.0 * random.random()) for sedge in sub.edges}
     for sedge in sub.edges:
         sub.edge[sedge]['cost'] = edge_costs[sedge]
 
     bellman_ford_time = time.time()
     sub.initialize_shortest_paths_costs()
     bellman_ford_time = time.time() - bellman_ford_time
-
 
     svpc = treewidth_model.ShortestValidPathsComputer(sub, req, vmrc, edge_costs)
     dijkstra_time = time.time()
@@ -134,16 +135,15 @@ def test_shortest_valid_paths_computer(request_id):
     for reqedge in req.edges:
         for snode_source in sub.nodes:
             for snode_target in sub.nodes:
-                #print svpc.valid_sedge_costs[reqedge][(snode_source, snode_target)]
-                #print sub.get_shortest_paths_cost(snode_source, snode_target)
+                # print svpc.valid_sedge_costs[reqedge][(snode_source, snode_target)]
+                # print sub.get_shortest_paths_cost(snode_source, snode_target)
                 assert svpc.valid_sedge_costs[reqedge][(snode_source, snode_target)] == pytest.approx(sub.get_shortest_paths_cost(snode_source, snode_target))
 
-
-    print("\nComputation times were:\n\tBellman-Ford: {}\n\tDijkstra:     {}\n\n\tSpeedup by using Dijkstra: {:2.2f} (<1 is bad)".format(bellman_ford_time, dijkstra_time, (bellman_ford_time/dijkstra_time)))
+    print("\nComputation times were:\n\tBellman-Ford: {}\n\tDijkstra:     {}\n\n\tSpeedup by using Dijkstra: {:2.2f} (<1 is bad)".format(bellman_ford_time, dijkstra_time, (bellman_ford_time / dijkstra_time)))
 
 
 # TEST OptimizedDynVMP
-
+@pytest.mark.skip()
 @pytest.mark.parametrize("request_id",
                          example_requests_small)
 def test_opt_dynvmp(request_id):
@@ -175,33 +175,28 @@ def test_opt_dynvmp(request_id):
         selected_nodes = []
         while len(selected_nodes) == 0:
             print "selected nodes are {}".format(selected_nodes)
-            selected_nodes = valid_reqnode_list[0:random.randint(30*len(valid_reqnode_list)/40, len(valid_reqnode_list))]
+            selected_nodes = valid_reqnode_list[0:random.randint(30 * len(valid_reqnode_list) / 40, len(valid_reqnode_list))]
         req.set_allowed_nodes(reqnode, selected_nodes)
         print "Allowd nodes for {} are {}.".format(reqnode, req.get_allowed_nodes(reqnode))
     for reqedge in req.edges:
         random.shuffle(sedge_list)
-        req.set_allowed_edges(reqedge,sedge_list[0:random.randint(30*len(sedge_list)/40, len(sedge_list))])
+        req.set_allowed_edges(reqedge, sedge_list[0:random.randint(30 * len(sedge_list) / 40, len(sedge_list))])
         print "Allowd edges for {} are {}.".format(reqedge, req.get_allowed_edges(reqedge))
 
-    #random edge costs
-    edge_costs = {sedge : max(1,1000.0 * random.random()) for sedge in sub.edges}
+    # random edge costs
+    edge_costs = {sedge: max(1, 1000.0 * random.random()) for sedge in sub.edges}
     for sedge in sub.edges:
-        sub.edge[sedge]['cost'] = 1#edge_costs[sedge]
+        sub.edge[sedge]['cost'] = 1  # edge_costs[sedge]
     for snode in sub.nodes:
         for type in sub.node[snode]['cost'].keys():
             sub.node[snode]['cost'][type] = 1
 
-
-    from alib import mip
-    from alib import datamodel as dm
     scenario = dm.Scenario("test", sub, [req])
     gurobi = mip.ClassicMCFModel(scenario)
     gurobi.init_model_creator()
     gurobi.model.setParam("LogToConsole", 1)
     gurobi.compute_integral_solution()
     gurobi.model.write("foo.lp")
-
-
 
     td_comp = treewidth_model.TreeDecompositionComputation(req)
     tree_decomp = td_comp.compute_tree_decomposition()
@@ -221,7 +216,62 @@ def test_opt_dynvmp(request_id):
     print "Returned mapping! Namely, the following: {}".format(result_mapping)
 
 
+@pytest.mark.parametrize("request_id", example_requests)
+@pytest.mark.parametrize("random_seed", [0])
+@pytest.mark.parametrize("allowed_nodes_ratio", [0.1, 0.2, 0.3, 0.4])  # avoid too large values because of memory footprint
+@pytest.mark.parametrize("allowed_edges_ratio", [0.1, 0.2, 0.4, 0.6, 0.8, 1.0])
+def test_opt_dynvmp_and_classic_mcf_agree_for_unambiguous_scenario(
+        request_id, random_seed, allowed_nodes_ratio, allowed_edges_ratio
+):
+    random.seed(random_seed)
+    print "allowed nodes: {} %, allowed edges: {} %".format(100 * allowed_nodes_ratio, 100 * allowed_edges_ratio)
+    req = create_test_request(request_id, set_allowed_nodes=False)
+    node_type = "test_type"
+    sub = create_test_substrate_large(node_types=[node_type])
+    assert set(sub.get_types()) == {node_type}
 
+    num_allowed_nodes = int(allowed_nodes_ratio * len(sub.nodes))
+    for i in req.nodes:
+        assert req.get_type(i) == node_type
+        req.node[i]["allowed_nodes"] = random.sample(list(sub.nodes), num_allowed_nodes)
 
+    num_allowed_edges = int(allowed_edges_ratio * len(sub.edges))
+    for ij in req.edges:
+        req.edge[ij]["allowed_edges"] = random.sample(list(sub.edges), num_allowed_edges)
 
+    # randomize all costs to force unambiguous cost-optimal embedding
+    for u in sub.nodes:
+        for t in sub.get_supported_node_types(u):
+            sub.node[u]["cost"][t] = random.random()
+    for uv in sub.edges:
+        sub.edge[uv]["cost"] = random.random()
 
+    gurobi = mip.ClassicMCFModel(dm.Scenario("test", sub, [req], objective=dm.Objective.MIN_COST))
+    gurobi.init_model_creator()
+    gurobi_solution = gurobi.compute_integral_solution()
+
+    td_comp = treewidth_model.TreeDecompositionComputation(req)
+    tree_decomp = td_comp.compute_tree_decomposition()
+    sntd = treewidth_model.SmallSemiNiceTDArb(tree_decomp, req)
+    opt_dynvmp = treewidth_model.OptimizedDynVMP(sub, req, sntd)
+
+    # Bypass cost initialization in OptimizedDynVMP.__init__
+    opt_dynvmp.snode_costs = {u: sub.node[u]["cost"][node_type] for u in sub.nodes}
+    opt_dynvmp.sedge_costs = {uv: sub.edge[uv]["cost"] for uv in sub.edges}
+    opt_dynvmp.svpc.edge_costs = {uv: sub.edge[uv]["cost"] for uv in sub.edges}
+
+    try:
+        opt_dynvmp.initialize_data_structures()
+        opt_dynvmp.compute_solution()
+    except OSError as e:
+        assert "memory" in e
+        print "Aborted due to memory error"
+        return
+    dynvmp_result = opt_dynvmp.recover_mapping()
+    if dynvmp_result is not None:  # solution exists
+        root_cost, mapping = dynvmp_result
+        gurobi_obj = gurobi_solution.status.objValue
+        assert abs(root_cost - gurobi_obj) <= 0.0001
+        assert mapping == gurobi_solution.solution.request_mapping[req].mapping_nodes
+    else:
+        assert gurobi_solution is None
