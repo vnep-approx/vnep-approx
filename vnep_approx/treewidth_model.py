@@ -2,9 +2,11 @@ import itertools
 import os
 import subprocess
 from collections import deque
+import numpy as np
+from heapq import heappush, heappop
+
 
 from gurobipy import GRB, LinExpr
-
 from alib import datamodel, modelcreator, solutions
 
 """ Some datastructures to represent tree decompositions """
@@ -271,6 +273,14 @@ class TDArborescence(datamodel.Graph):
                     q.append(c)
         assert visited == self.nodes  # sanity check
 
+class NodeType(object):
+
+    Leaf = 0
+    Introduction = 1
+    Forget = 2
+    Join = 3
+    Root = 4
+
 class SmallSemiNiceTDArb(TreeDecomposition):
 
     def __init__(self, original_td, request):
@@ -284,13 +294,11 @@ class SmallSemiNiceTDArb(TreeDecomposition):
         self.out_neighbors = {}
         self.in_neighbor = {}
         self.root = None
-        self.post_order_traversal = None
+        self.pre_order_traversal = None
 
         self.node_classification = {}
 
         self._create_arborescence()
-
-
 
 
     #essentially just make a copy
@@ -359,11 +367,13 @@ class SmallSemiNiceTDArb(TreeDecomposition):
                 raise ValueError("Tree decomposition was not nice in the first place!")
 
             internode = "bag_intersection_{}_{}".format(tail, head)
-            print("Splitting edge {} with repsective node bags {} and {} to introduce new node {} with bag {}".format(edge,
-                                                                                                                      tail_bag,
-                                                                                                                      head_bag,
-                                                                                                                      internode,
-                                                                                                                      intersection))
+            # print("Splitting edge {} with repsective "
+            #       "node bags {} and {} to introduce "
+            #       "new node {} with bag {}".format(edge,
+            #                                        tail_bag,
+            #                                        head_bag,
+            #                                        internode,
+            #                                        intersection))
 
 
             self.add_node(internode, intersection)
@@ -385,13 +395,12 @@ class SmallSemiNiceTDArb(TreeDecomposition):
                 best_root = node
 
         self.root = best_root
-        self.post_order_traversal = []
+        self.pre_order_traversal = []
         #root is set
         visited = set()
         queue = [self.root]
         while len(queue) > 0:
             current_node = queue.pop(0)
-            print("Handling node {}".format(current_node))
             visited.add(current_node)
             self.out_neighbors[current_node] = []
             for edge in self.incident_edges[current_node]:
@@ -407,33 +416,651 @@ class SmallSemiNiceTDArb(TreeDecomposition):
                     self.out_neighbors[current_node].append(other)
                     queue.append(other)
 
-            self.post_order_traversal.append(current_node)
+            self.pre_order_traversal.append(current_node)
 
-        self.post_order_traversal = reversed(self.post_order_traversal)
+        self.pre_order_traversal = list(self.pre_order_traversal)
 
-        print("Nodes:\n{}".format(self.nodes))
-        print("Edges:\n{}".format(self.edges))
+        self.post_order_traversal = list(reversed(self.pre_order_traversal))
 
-        for node in self.nodes:
-            if len(self.out_neighbors[node]) == 0:
-                self.node_classification[node] = 'L'
+        for node in self.post_order_traversal:
+            if node not in self.in_neighbor:
+                self.in_neighbor[node] = None
+                self.node_classification[node] = NodeType.Root
+            elif len(self.out_neighbors[node]) == 0:
+                self.node_classification[node] = NodeType.Leaf
             elif len(self.out_neighbors[node]) == 1:
                 out_neighbor = self.out_neighbors[node][0]
                 if self.node_bag_dict[out_neighbor].issubset(self.node_bag_dict[node]):
-                    self.node_classification[node] = 'I'
+                    self.node_classification[node] = NodeType.Introduction
                 elif self.node_bag_dict[node].issubset(self.node_bag_dict[out_neighbor]):
-                    self.node_classification[node] = 'F'
+                    self.node_classification[node] = NodeType.Forget
                 else:
                     raise ValueError("Don't know what's happening here!")
             else:
-                self.node_classification[node] = 'J'
+                self.node_classification[node] = NodeType.Join
                 for out_neighbor in self.out_neighbors[node]:
-                    if not self.node_bag_dict[out_neighbor].issubset(self.node_bag_dict[node]):
-                        raise ValueError("Children should always be subsets of the join node!")
+                    if not self.node_bag_dict[out_neighbor].issubset(self.node_bag_dict[node]) or not self.node_classification[out_neighbor] == NodeType.Forget:
+                        raise ValueError("Children of Join nodes must be forget nodes!")
+
+
+
+class ValidMappingRestrictionComputer(object):
+
+    def __init__(self, substrate, request):
+        self.substrate = substrate
+        self.request = request
+
+        self.allowed_nodes = {}
+        self.allowed_edges = {}
+        self.sorted_substrate_nodes = sorted(list(substrate.nodes))
+
+        self.edge_set_to_edge_set_id = {}
+        self.request_edge_to_edge_set_id = {}
+        self.edge_set_id_to_edge_set = {}
+        self.number_of_different_edge_sets = 0
+
+    def compute(self):
+        self._process_request_node_mapping_restrictions()
+        self._process_request_edge_mapping_restrictions()
+        self._process_edge_sets()
+
+    def _process_request_node_mapping_restrictions(self):
+
+        for reqnode in self.request.nodes:
+            node_demand = self.request.get_node_demand(reqnode)
+
+            allowed_nodes = self.request.get_allowed_nodes(reqnode)
+            if allowed_nodes is None:
+                allowed_nodes = list(self.substrate.get_nodes_by_type(self.request.get_type(reqnode)))
+            allowed_nodes_copy = list(allowed_nodes)
+
+            for allowed_node in allowed_nodes_copy:
+                if self.substrate.get_node_capacity(allowed_node) < node_demand:
+                    allowed_nodes.remove(allowed_node)
+            self.allowed_nodes[reqnode] = sorted(allowed_nodes)
+
+    def _process_request_edge_mapping_restrictions(self):
+        for reqedge in self.request.edges:
+            edge_demand = self.request.get_edge_demand(reqedge)
+            allowed_edges = self.request.get_allowed_edges(reqedge)
+            if allowed_edges is None:
+                allowed_edges = set(self.substrate.get_edges())
+            else:
+                allowed_edges = set(allowed_edges)
+            copy_of_edges = set(allowed_edges)
+
+            for sedge in copy_of_edges:
+                if self.substrate.get_edge_capacity(sedge) < edge_demand:
+                    allowed_edges.remove(sedge)
+
+            self.allowed_edges[reqedge] = allowed_edges
+
+    def _process_edge_sets(self):
+
+        for reqedge in self.request.edges:
+            frozen_edge_set = frozenset(self.allowed_edges[reqedge])
+            if frozen_edge_set in self.edge_set_to_edge_set_id:
+                self.request_edge_to_edge_set_id[reqedge] = self.edge_set_to_edge_set_id[frozen_edge_set]
+            else:
+                self.edge_set_id_to_edge_set[self.number_of_different_edge_sets] = frozen_edge_set
+                self.edge_set_to_edge_set_id[frozen_edge_set] = self.number_of_different_edge_sets
+                self.request_edge_to_edge_set_id[reqedge] = self.number_of_different_edge_sets
+                self.number_of_different_edge_sets += 1
+
+    def get_allowed_snode_list(self, reqnode):
+        return self.allowed_nodes[reqnode]
+
+    def get_allowed_sedge_set(self, reqedge):
+        return self.allowed_edges[reqedge]
+
+    def get_edge_set_mapping(self):
+        return self.edge_set_id_to_edge_set
+
+    def get_reqedge_to_edgeset_id_mapping(self):
+        return self.request_edge_to_edge_set_id
+
+    def get_number_of_different_edge_sets(self):
+        return self.number_of_different_edge_sets
+
+
+class ShortestValidPathsComputer(object):
+
+    def __init__(self, substrate, request, valid_mapping_restriction_computer, edge_costs):
+        self.substrate = substrate
+        self.request = request
+        self.valid_mapping_restriction_computer = valid_mapping_restriction_computer
+        self.edge_costs = edge_costs
+        self.edge_mapping_invalidities = False
+
+    def compute(self):
+        self._prepare_numeric_graph()
+        self._compute_valid_edge_mapping_costs()
+
+    def _prepare_numeric_graph(self):
+        #prepare and store information on "numeric graph"
+        self.number_of_nodes = 0
+        self.num_id_to_snode_id = []
+        self.snode_id_to_num_id = {}
+
+        for snode in self.substrate.nodes:
+            self.num_id_to_snode_id.append(snode)
+            self.snode_id_to_num_id[snode] = self.number_of_nodes
+            self.number_of_nodes += 1
+
+    def _compute_substrate_edge_abstraction_with_integer_nodes(self, valid_edge_set):
+        out_neighbors_with_cost = []
+
+        for num_node in range(self.number_of_nodes):
+
+            snode = self.num_id_to_snode_id[num_node]
+            neighbor_and_cost_list = []
+
+            for sedge in self.substrate.out_edges[snode]:
+                if sedge in valid_edge_set:
+                    _, out_neighbor = sedge
+                    num_id_neighbor = self.snode_id_to_num_id[out_neighbor]
+                    neighbor_and_cost_list.append((num_id_neighbor, self.edge_costs[sedge]))
+
+            out_neighbors_with_cost.append(neighbor_and_cost_list)
+
+        return out_neighbors_with_cost
+
+    def _compute_valid_edge_mapping_costs(self):
+
+        edge_set_id_to_edge_set = self.valid_mapping_restriction_computer.get_edge_set_mapping()
+        number_of_valid_edge_sets = self.valid_mapping_restriction_computer.get_number_of_different_edge_sets()
+
+        self.valid_sedge_costs = {id : {} for id in range(number_of_valid_edge_sets)}
+        # self.valid_sedge_paths = {id : {} for id in range(number_of_valid_edge_sets)}
+        self.valid_sedge_pred = {id : {} for id in range(number_of_valid_edge_sets)}
+
+        number_of_nodes = len(self.substrate.nodes)
+
+        distance = np.full(number_of_nodes, np.inf, dtype=np.float64)
+        predecessor = np.full(number_of_nodes, -1, dtype=np.int32)
+
+        for edge_set_index in range(number_of_valid_edge_sets):
+
+            out_neighbors_with_cost = self._compute_substrate_edge_abstraction_with_integer_nodes(edge_set_id_to_edge_set[edge_set_index])
+
+            for num_source_node in range(number_of_nodes):
+
+                #reinitialize it
+                distance.fill(np.inf)
+                predecessor.fill(-1)
+
+                queue = [(0.0, (num_source_node, num_source_node))]
+                while queue:
+                    dist, (num_node, num_predecessor) = heappop(queue)
+                    if predecessor[num_node] == -1:
+                        distance[num_node] = dist
+                        predecessor[num_node] = num_predecessor
+
+                        for num_neighbor, edge_cost in out_neighbors_with_cost[num_node]:
+                            if predecessor[num_neighbor] == -1:
+                                heappush(queue, (dist + edge_cost, (num_neighbor, num_node)))
+
+                for num_target_node in range(number_of_nodes):
+                    #print("{} of {}".format(num_target_node, number_of_nodes))
+                    if distance[num_target_node] != np.inf:
+                        # u = num_target_node
+                        # path = []
+                        # while u != num_source_node:
+                        #     path.append((num_id_to_snode_id[predecessor[u]], num_id_to_snode_id[u]))
+                        #     u = predecessor[u]
+
+                        self.valid_sedge_costs[edge_set_index][(self.num_id_to_snode_id[num_source_node], self.num_id_to_snode_id[num_target_node])] = distance[num_target_node]
+                        # self.valid_sedge_paths[edge_set_index][(num_id_to_snode_id[num_source_node], num_id_to_snode_id[num_target_node])] = path
+                    else:
+                        self.valid_sedge_costs[edge_set_index][(self.num_id_to_snode_id[num_source_node], self.num_id_to_snode_id[num_target_node])] = np.nan
+                        # self.valid_sedge_paths[edge_set_index][(num_id_to_snode_id[num_source_node], num_id_to_snode_id[num_target_node])] = None
+                        self.edge_mapping_invalidities = True
+
+                converted_pred_dict = {self.num_id_to_snode_id[num_node] : self.num_id_to_snode_id[predecessor[num_node]] if predecessor[num_node] != -1 else None }
+                self.valid_sedge_pred[edge_set_index][self.num_id_to_snode_id[num_source_node]] = converted_pred_dict
+
+        request_edge_to_edge_set_id = self.valid_mapping_restriction_computer.get_reqedge_to_edgeset_id_mapping()
+
+        for request_edge, edge_set_id_to_edge_set in request_edge_to_edge_set_id.iteritems():
+            self.valid_sedge_costs[request_edge] = self.valid_sedge_costs[edge_set_id_to_edge_set]
+            # self.valid_sedge_paths[request_edge] = self.valid_sedge_paths[edge_set_id_to_edge_set]
+            self.valid_sedge_pred[request_edge] = self.valid_sedge_pred[edge_set_id_to_edge_set]
+
+
+
+class OptimizedDynVMPNode(object):
+
+    def __init__(self, optdynvmp_parent, treenode):
+        self.optdynvmp_parent = optdynvmp_parent
+        self.substrate = optdynvmp_parent.substrate
+        self.request = optdynvmp_parent.request
+        self.ssntda = optdynvmp_parent.ssntda
+        self.vmrc = self.optdynvmp_parent.vmrc
+        self.svpc = self.optdynvmp_parent.svpc
+        self.treenode = treenode
+        self.nodetype = self.optdynvmp_parent.ssntda.node_classification[treenode]
+
+    '''
+    Helper functions for accessing indices of mappings effectively
+    '''
+
+    def get_indices_of_mappings_under_restrictions(self, mapping_restrictions):
+        resulting_list_of_indices = []
+        self.get_indices_of_mappings_under_restrictions_inplace(mapping_restrictions, resulting_list_of_indices)
+        return resulting_list_of_indices
+
+    def get_indices_of_mappings_under_restrictions_inplace(self, mapping_restrictions, result_list):
+        meta_information, construction_rule = self.get_construction_rule_for_indexing_mappings_under_restrictions(mapping_restrictions)
+        self.recursive_index_generation(meta_information,
+                                        construction_rule,
+                                        result_list,
+                                        parent_value=0)
+
+
+
+    def get_construction_rule_for_indexing_mappings_under_restrictions(self, mapping_restrictions):
+        construction_rule = []
+        meta_information = []
+
+        for reqnode in self.contained_request_nodes:
+            meta_information.append((reqnode, self.number_of_allowed_nodes[reqnode]))
+            if reqnode in mapping_restrictions:
+                construction_rule.append([self.index_of_allowed_node[reqnode][mapping_restrictions[reqnode]]])
+            else:
+                construction_rule.append(self.allowed_node_indexes[reqnode])
+
+        return meta_information, construction_rule
+
+
+    def recursive_index_generation(self,
+                                   meta_information,
+                                   construction_rule,
+                                   result_list,
+                                   parent_value = 0,
+                                   current_reqnode_index = 0):
+        if current_reqnode_index > 0:
+            parent_value *= meta_information[current_reqnode_index][1] #multiple number of allowed nodes
+        for value in construction_rule[current_reqnode_index]:
+            current_value = parent_value + value
+            if current_reqnode_index < self.number_of_request_nodes-1:
+                self.recursive_index_generation(meta_information,
+                                                construction_rule,
+                                                result_list,
+                                                current_value,
+                                                current_reqnode_index+1
+                                                )
+            else:
+                #if self.validity_array[current_value]:
+                result_list.append(current_value)
+
+    def get_node_mapping_based_on_index(self, mapping_index):
+        if mapping_index < 0 or mapping_index >= self.number_of_potential_node_mappings:
+            raise ValueError("Given index {} is out of bounds [0,...,{}].".format(mapping_index,
+                                                                                  self.number_of_potential_node_mappings))
+
+        debug = False
+
+        if debug:
+            o_result = {}
+            for o_mapping_index, mapping in enumerate(itertools.product(*self.list_of_ordered_allowed_nodes)):
+                if o_mapping_index != mapping_index:
+                    continue
+                for reqnode_index, reqnode in enumerate(self.contained_request_nodes):
+                    o_result[reqnode] = mapping[reqnode_index]
+                break
+
+
+        result_node_mapping = {}
+        for reversed_reqnode_index in range(self.number_of_request_nodes):
+            request_node = self._reversed_contained_request_nodes[reversed_reqnode_index]
+            number_of_allowed_nodes_for_request_node =  self.number_of_allowed_nodes[request_node]
+            snode_index = mapping_index % number_of_allowed_nodes_for_request_node
+            snode = self.allowed_nodes[request_node][snode_index]
+            result_node_mapping[request_node] = snode
+            mapping_index /= number_of_allowed_nodes_for_request_node
+
+        if debug:
+            print "Naively found vs. intelligently found:\n\t{}\n\t{}".format(result_node_mapping, o_result)
+
+            if set(result_node_mapping.keys()) != set(o_result.keys()):
+                raise ValueError("THis is bad!")
+            for reqnode in result_node_mapping.keys():
+                if result_node_mapping[reqnode] != o_result[reqnode]:
+                    raise ValueError("Really bad!")
+
+        return result_node_mapping
+
+
+    def initialize(self):
+        self.contained_request_nodes = sorted(list(self.ssntda.node_bag_dict[self.treenode]))
+        self.number_of_request_nodes = len(self.contained_request_nodes)
+
+        self._reversed_contained_request_nodes = list(reversed(self.contained_request_nodes))
+        self.index_of_req_node = {reqnode : self.contained_request_nodes.index(reqnode) for reqnode in self.contained_request_nodes}
+
+        self.contained_request_edges = []
+        for reqnode_source in self.contained_request_nodes:
+            for reqnode_target in self.request.out_neighbors[reqnode_source]:
+                if reqnode_target in self.contained_request_nodes:
+                    self.contained_request_edges.append((reqnode_source, reqnode_target))
+
+        self.allowed_nodes = {reqnode : self.vmrc.get_allowed_snode_list(reqnode) for reqnode in self.contained_request_nodes}
+
+
+
+        self.list_of_ordered_allowed_nodes = [self.allowed_nodes[reqnode] for reqnode in self.contained_request_nodes]
+
+        self.index_of_allowed_node = {reqnode :
+                                          {snode : self.allowed_nodes[reqnode].index(snode)
+                                           for snode in self.allowed_nodes[reqnode]}
+                                      for reqnode in self.contained_request_nodes}
+
+        self.number_of_allowed_nodes = {reqnode : len(self.allowed_nodes[reqnode]) for reqnode in self.contained_request_nodes}
+        self.allowed_node_indexes = {reqnode: [x for x in range(self.number_of_allowed_nodes[reqnode])] for reqnode in self.contained_request_nodes}
+
+
+        self.number_of_potential_node_mappings =  int(np.prod(self.number_of_allowed_nodes.values()))
+        if self.number_of_potential_node_mappings < 1:
+            raise ValueError("There exist no valid node mappings")
+
+        self.validity_array = np.full(self.number_of_potential_node_mappings, True, dtype=np.bool)
+        self._initialize_validity_array()
+        self.mapping_costs = np.full(self.number_of_potential_node_mappings, 0.0, dtype=np.float32)
+        self.mapping_costs[~self.validity_array] = np.nan
+        print "Costs array of {} has {} many nan entries".format(self.treenode,
+                                                                      np.count_nonzero(np.isnan(self.mapping_costs)))
+
+
+    def _initialize_validity_array(self):
+        # print "Initializing validity array"
+        if self.svpc.edge_mapping_invalidities:
+
+            for (reqedge_source, reqedge_target) in self.contained_request_edges:
+
+                # print "Handling edge {}".format((reqedge_source, reqedge_target))
+
+                for mapping_of_source, mapping_of_target in itertools.product(self.allowed_nodes[reqedge_source],
+                                                                    self.allowed_nodes[reqedge_target]):
+
+                    # print "\tmappings: {} {}".format(mapping_of_source, mapping_of_target)
+                    # print "\t\tcorresponding costs: {}".format(
+                    #     self.svpc.valid_sedge_costs[(reqedge_source, reqedge_target)][
+                    #         (mapping_of_source, mapping_of_target)])
+                    if np.isnan(self.svpc.valid_sedge_costs[(reqedge_source, reqedge_target)][(mapping_of_source, mapping_of_target)]):
+
+
+                        index_list_to_set_to_false = self.get_indices_of_mappings_under_restrictions({reqedge_source: mapping_of_source,
+                                                                                                          reqedge_target: mapping_of_target})
+
+                        self.validity_array[index_list_to_set_to_false] = False
+        print "Validity array of {} has {} many valid entries".format(self.treenode, np.count_nonzero(self.validity_array))
+
+
+    def initialize_corresponding_to_neighbors(self):
+        #reversed arc orientation: the in-neighbor becomes the out-neighbor and the out-neighbors become the in-neighbors
+        self.out_neighbor = None
+        self.in_neighbors = []
+        if self.ssntda.in_neighbor[self.treenode] is not None:
+            self.out_neighbor = self.optdynvmp_parent.dynvmp_tree_nodes[self.ssntda.in_neighbor[self.treenode]]
+        for neighbor in self.ssntda.out_neighbors[self.treenode]:
+            self.in_neighbors.append(self.optdynvmp_parent.dynvmp_tree_nodes[neighbor])
+
+
+        self.forgotten_virtual_elements_out_neigbor = [[],[]]
+
+        if self.nodetype != NodeType.Root:
+            for reqnode in self.contained_request_nodes:
+                if reqnode not in self.out_neighbor.contained_request_nodes:
+                    if self.out_neighbor.nodetype != NodeType.Forget:
+                        raise ValueError("I can only forget something, if the out neighbor is a forget node!")
+                    self.forgotten_virtual_elements_out_neigbor[0].append(reqnode)
+            for reqedge in self.contained_request_edges:
+                if reqedge not in self.out_neighbor.contained_request_edges:
+                    if self.out_neighbor.nodetype != NodeType.Forget:
+                        raise ValueError("I can only forget something, if the out neighbor is a forget node!")
+                    self.forgotten_virtual_elements_out_neigbor[1].append(reqedge)
+        else:
+            self.forgotten_virtual_elements_out_neigbor[0] = self.contained_request_nodes
+            self.forgotten_virtual_elements_out_neigbor[1] = self.contained_request_edges
+
+
+
+    def initialize_local_cost_updates_and_selection_matrices(self):
+        number_of_nodes = len(self.substrate.nodes)
+        if self.nodetype != NodeType.Forget:
+
+            reqedge_to_edge_set_id_mapping = self.vmrc.get_reqedge_to_edgeset_id_mapping()
+
+            self.local_node_cost_weights = np.full((number_of_nodes, self.number_of_potential_node_mappings), 0.0, dtype=np.float32)
+            self.local_edge_cost_weights = [None] * self.vmrc.get_number_of_different_edge_sets()
+
+            for reqnode in self.forgotten_virtual_elements_out_neigbor[0]:
+                for snode in self.allowed_nodes[reqnode]:
+                    indices = self.get_indices_of_mappings_under_restrictions({reqnode: snode})
+                    self.local_node_cost_weights[self.optdynvmp_parent.sorted_snode_index[snode], indices] += self.request.get_node_demand(reqnode)
+
+            for reqedge in self.forgotten_virtual_elements_out_neigbor[1]:
+                req_source, req_target = reqedge
+
+                edge_set_index_of_edge = reqedge_to_edge_set_id_mapping[reqedge]
+                current_edge_cost_weights = None
+
+                if self.local_edge_cost_weights[edge_set_index_of_edge] is None:
+                    current_edge_cost_weights = np.full((number_of_nodes * number_of_nodes, self.number_of_potential_node_mappings), 0.0, dtype=np.float32)
+                    self.local_edge_cost_weights[edge_set_index_of_edge] = current_edge_cost_weights
+                else:
+                    current_edge_cost_weights = self.local_edge_cost_weights[edge_set_index_of_edge]
+
+                for source_mapping, target_mapping in itertools.product(self.allowed_nodes[req_source], self.allowed_nodes[req_target]):
+                    indices = self.get_indices_of_mappings_under_restrictions({req_source: source_mapping,
+                                                                               req_target: target_mapping})
+                    current_edge_cost_weights[self.optdynvmp_parent.sedge_pair_index[(source_mapping, target_mapping)], indices] += self.request.get_edge_demand(reqedge)
+
+
+        if self.nodetype == NodeType.Forget:
+            if len(self.in_neighbors) != 1:
+                raise ValueError("Wasn't expecting more than a single neighbor!")
+            in_neighbor = self.in_neighbors[0]
+            out_neighbor = self.out_neighbor
+
+            self.minimum_selection_pull = [list() for x in range(self.number_of_potential_node_mappings)] #incoming neighbor
+            self.minimum_selection_push = [list() for x in range(self.number_of_potential_node_mappings)] #out neighbor
+
+            partial_fixed_mapping = {reqnode: None for reqnode in self.contained_request_nodes}
+
+            for local_node_mapping_index, node_mapping in enumerate(itertools.product(*self.list_of_ordered_allowed_nodes)):
+                if not self.validity_array[local_node_mapping_index]:
+                    self.minimum_selection_pull[local_node_mapping_index] = None
+                    continue
+                for node_mapping_index, reqnode in enumerate(self.contained_request_nodes):
+                    partial_fixed_mapping[reqnode] = node_mapping[node_mapping_index]
+
+                in_neighbor.get_indices_of_mappings_under_restrictions_inplace(partial_fixed_mapping,
+                                                                               self.minimum_selection_pull[
+                                                                                   local_node_mapping_index])
+
+                out_neighbor.get_indices_of_mappings_under_restrictions_inplace(partial_fixed_mapping,
+                                                                                self.minimum_selection_push[
+                                                                                    local_node_mapping_index])
+
+                if len(self.minimum_selection_pull[local_node_mapping_index]) == 0 or len(self.minimum_selection_push[local_node_mapping_index]) == 0:
+                    self.minimum_selection_pull[local_node_mapping_index] = None
+
+    def _apply_local_costs_updates(self):
+        if self.nodetype == NodeType.Forget:
+            raise ValueError("This function should never be called for a Forget Node!")
+
+        self.mapping_costs += np.dot(self.optdynvmp_parent.node_costs_array, self.local_node_cost_weights)
+        for edge_set_index, edge_cost_weights in enumerate(self.local_edge_cost_weights):
+            if edge_cost_weights is None:
+                continue
+            self.mapping_costs += np.dot(self.optdynvmp_parent.edge_costs_array[edge_set_index], edge_cost_weights)
+
+    def _apply_cost_propagation_forget_node(self):
+        if self.nodetype != NodeType.Forget:
+            raise ValueError("This function can only be called for forget nodes!")
+        if len(self.in_neighbors) != 1:
+            raise ValueError("Wasn't expecting more than a single neighbor!")
+
+        in_neighbor = self.in_neighbors[0]
+        out_neighbor = self.out_neighbor
+
+        for local_node_mapping_index in xrange(int(self.number_of_potential_node_mappings)):
+            minimum_selection_indices_for_in_neighbor = self.minimum_selection_pull[local_node_mapping_index]
+            if minimum_selection_indices_for_in_neighbor != None:
+                self.mapping_costs[local_node_mapping_index] = np.nanmin(in_neighbor.mapping_costs[minimum_selection_indices_for_in_neighbor])
+                out_neighbor.mapping_costs[self.minimum_selection_push[local_node_mapping_index]] += self.mapping_costs[local_node_mapping_index]
+
+    def compute_costs_based_on_children(self):
+        if self.nodetype == NodeType.Leaf:
+            #given that all costs were initialized to 0 / nan, we just need to add costs that will be forgotten when stepping up
+            self._apply_local_costs_updates()
+        elif self.nodetype == NodeType.Introduction or self.nodetype == NodeType.Join or self.nodetype == NodeType.Root:
+            self._apply_local_costs_updates()
+        elif self.nodetype == NodeType.Forget:
+            self._apply_cost_propagation_forget_node()
+        else:
+            raise ValueError("Don't know whats going on here!")
 
 
 
 
+
+class OptimizedDynVMP(object):
+
+    def __init__(self, substrate, request, ssntda, initial_node_cost_value=1, initial_edge_cost_value=1):
+        self.substrate = substrate
+        self.request = request
+        if not isinstance(ssntda, SmallSemiNiceTDArb):
+            raise ValueError("The Optimized DYNVMP Algorithm expects a small-semi-nice-tree-decomposition-arborescence")
+        self.ssntda = ssntda
+
+
+        self.snode_costs = {snode: initial_node_cost_value for snode in substrate.nodes}
+        self.sedge_costs = {sedge: initial_edge_cost_value for sedge in substrate.edges}
+
+        self.vmrc = ValidMappingRestrictionComputer(substrate=substrate, request=request)
+        self.svpc = ShortestValidPathsComputer(substrate=substrate, request=request, valid_mapping_restriction_computer=self.vmrc, edge_costs=self.sedge_costs)
+
+
+    def initialize_data_structures(self):
+        self.vmrc.compute()
+        self.svpc.compute()
+
+        self.sorted_snodes = sorted(list(self.substrate.nodes))
+        self.sorted_snode_index = {snode : self.sorted_snodes.index(snode) for snode in self.sorted_snodes}
+
+        number_of_nodes = len(self.sorted_snodes)
+        self.snode_index = {snode : self.sorted_snodes.index(snode) for snode in self.substrate.nodes}
+        self.sedge_pair_index = {(snode_1, snode_2) : self.snode_index[snode_1] * number_of_nodes + self.snode_index[snode_2]
+                                 for (snode_1,snode_2) in itertools.product(self.sorted_snodes, self.sorted_snodes)}
+
+        self.node_costs_array = np.full(len(self.sorted_snodes), 0.0, dtype=np.float32)
+        for node_index, snode in enumerate(self.sorted_snodes):
+            self.node_costs_array[node_index] = self.snode_costs[snode]
+
+        self.edge_costs_array = []
+        for edge_set_index in range(self.vmrc.get_number_of_different_edge_sets()):
+            self.edge_costs_array.append(np.full(number_of_nodes*number_of_nodes, 0.0, dtype=np.float32))
+            for node_pair_index, (snode_1, snode_2) in enumerate(itertools.product(self.sorted_snodes, self.sorted_snodes)):
+                if np.isnan(self.svpc.valid_sedge_costs[edge_set_index][(snode_1, snode_2)]):
+                    self.edge_costs_array[edge_set_index][node_pair_index] = 10000# need to fix that
+                else:
+                    self.edge_costs_array[edge_set_index][node_pair_index] = self.svpc.valid_sedge_costs[edge_set_index][(snode_1, snode_2)]
+
+
+
+        self.dynvmp_tree_nodes = {}
+        for t in self.ssntda.post_order_traversal:
+            self.dynvmp_tree_nodes[t] = OptimizedDynVMPNode(self, t)
+            self.dynvmp_tree_nodes[t].initialize()
+
+        for t in self.ssntda.post_order_traversal:
+            self.dynvmp_tree_nodes[t].initialize_corresponding_to_neighbors()
+            self.dynvmp_tree_nodes[t].initialize_local_cost_updates_and_selection_matrices()
+
+    def compute_solution(self):
+        for t in self.ssntda.post_order_traversal:
+            self.dynvmp_tree_nodes[t].compute_costs_based_on_children()
+
+    def recover_mapping(self):
+        print "Trying to recover mapping."
+        fixed_node_mappings = {}
+        for treenode in self.ssntda.pre_order_traversal:
+
+            print "\n\nFixed mappings are {}".format(fixed_node_mappings)
+
+            #find mapping of least cost
+            dynvmp_treenode = self.dynvmp_tree_nodes[treenode]
+
+            potential_node_mapping_indices = dynvmp_treenode.get_indices_of_mappings_under_restrictions(fixed_node_mappings)
+            corresponding_node_mapping = None
+
+            debug_dict = {debug_mapping_index : dynvmp_treenode.get_node_mapping_based_on_index(debug_mapping_index)
+                          for debug_mapping_index in potential_node_mapping_indices}
+            # print "potential mappings are: {}.... ".format(debug_dict)
+            # for key, value in debug_dict.iteritems():
+            #     print "{} yields..".format(key)
+            #     for value_key, value_value in value.iteritems():
+            #         print "\t{} --> {}".format(value_key, value_value)
+
+            try:
+                best_mapping_index = np.nanargmin(dynvmp_treenode.mapping_costs[potential_node_mapping_indices])
+
+                # debug_mapping = dynvmp_treenode.get_node_mapping_based_on_index(potential_node_mapping_indices[best_mapping_index])
+                # print "mapping {} achieves minimal cost".format(potential_node_mapping_indices[best_mapping_index])
+                # for value_key, value_value in debug_mapping.iteritems():
+                #     print "\t{} --> {}".format(value_key, value_value)
+
+                if dynvmp_treenode.nodetype == NodeType.Root:
+                    print "Optimal cost at root is: {}".format(dynvmp_treenode.mapping_costs[potential_node_mapping_indices[best_mapping_index]])
+                corresponding_node_mapping = dynvmp_treenode.get_node_mapping_based_on_index(potential_node_mapping_indices[best_mapping_index])
+            except ValueError:
+                import traceback
+                # print "Potential node mappings are: {}".format(potential_node_mapping_indices)
+                # print "Corresponding cost values are {}".format(
+                #     dynvmp_treenode.mapping_costs[potential_node_mapping_indices])
+
+                print "Costs are..."
+                print self.node_costs_array
+                print self.edge_costs_array
+
+                for o_t in self.ssntda.post_order_traversal:
+                    valid_entries = np.count_nonzero(self.dynvmp_tree_nodes[o_t].validity_array)
+                    nan_entries = np.count_nonzero(np.isnan(self.dynvmp_tree_nodes[o_t].mapping_costs))
+                    print "Node {} of type {} has {} many valid entries and {} many nan entries (of {})".format(o_t,
+                                                                                                                self.dynvmp_tree_nodes[o_t].nodetype,
+                                                                                                                valid_entries,
+                                                                                                                nan_entries,
+                                                                                                                np.shape(self.dynvmp_tree_nodes[o_t].validity_array))
+
+
+                traceback.print_exc()
+                print "Could not extend it :("
+                return None
+
+
+
+
+            for request_node, substrate_node in corresponding_node_mapping.iteritems():
+                if request_node in fixed_node_mappings:
+                    if fixed_node_mappings[request_node] != substrate_node:
+                        raise ValueError("Extracted local (optimal) mapping does not aggree with the previously set node mappings:\n\n"
+                                         "\tfixed_mappings: {}\n"
+                                         "\tcurrent mapping: {}".format(fixed_node_mappings,
+                                                                        corresponding_node_mapping))
+                else:
+                    fixed_node_mappings[request_node] = substrate_node
+
+        return fixed_node_mappings
+
+    def reinitialize(self, new_node_costs, new_edge_costs):
+        pass
+
+
+#
+#   OLD
+#
 
 
 

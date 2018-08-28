@@ -1,7 +1,7 @@
 from alib import datamodel, scenariogeneration
 
 
-def create_test_request(request_id, reverse_edges=None):
+def create_test_request(request_id, reverse_edges=None, set_allowed_nodes=True):
     """
     :param request_id:
     :param reverse_edges: set of edges that should be reversed if they are contained in the original request.
@@ -15,7 +15,10 @@ def create_test_request(request_id, reverse_edges=None):
         allowed = ["u", "v", "w"]
         if "assumed_allowed_nodes" in request_dict:
             allowed = request_dict["assumed_allowed_nodes"][node]
-        request.add_node(node, 1, "test_type", allowed_nodes=allowed)
+        if set_allowed_nodes:
+            request.add_node(node, 1, "test_type", allowed_nodes=allowed)
+        else:
+            request.add_node(node, 1, "test_type")
     for edge in request_dict["edges"]:
         if edge in reverse_edges:
             edge = edge[1], edge[0]
@@ -386,6 +389,11 @@ DRAGON_3 = {
         ("i4", "i7"),
     ],
 }
+
+example_requests_small = {
+    "cycle with branch": CYCLE_ON_CYCLE_1
+}
+
 
 example_requests = {
     "simple path": SIMPLE_PATH,
