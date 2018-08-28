@@ -77,7 +77,7 @@ def build_scenario_simple(index_parameter_tuple):
     :return:
     """
     i, parameters = index_parameter_tuple
-    dummy_substrate = datamodel.Substrate("substrate_should_be_irrelevant_for_this_experiment")
+    dummy_substrate = None
     graph_generator = SimpleRandomGraphGenerator()
     requests = None
     assert len(parameters["request_generation"]) == 1
@@ -103,32 +103,26 @@ class SimpleRandomGraphGenerator(object):
     """
 
     EXPECTED_PARAMETERS = [
-        "number_of_requests",
-        "connection_probability",
-        "min_number_of_nodes",
-        "max_number_of_nodes",
+        "number_of_nodes",
+        "probability"
     ]
 
     def __init__(self):
         pass
 
     def generate_request_list(self, raw_parameters):
-        number_of_requests = raw_parameters["number_of_requests"]
-        min_number_nodes = raw_parameters["min_number_of_nodes"]
-        max_number_nodes = raw_parameters["max_number_of_nodes"]
+        number_nodes = raw_parameters["number_of_nodes"]
         connection_probability = raw_parameters["probability"]
         graphs = []
-        for i in range(number_of_requests):
-            graph = self.generate_graph(min_number_nodes, max_number_nodes, connection_probability)
-            graphs.append(graph)
+        graph = self.generate_graph(number_nodes, connection_probability)
+        graphs.append(graph)
         return graphs
 
-    def generate_graph(self, min_number_nodes, max_number_nodes, connection_probability):
+    def generate_graph(self, number_of_nodes, connection_probability):
         name = "req"
         req = datamodel.Graph(name)
 
         # create nodes
-        number_of_nodes = random.randint(min_number_nodes, max_number_nodes)
         for i in xrange(1, number_of_nodes + 1):
             req.add_node(str(i))
 
@@ -170,14 +164,21 @@ class TreeDecompositionAlgorithmResult(modelcreator.AlgorithmResult):
     def get_solution(self):
         return self.tree_decompositions
 
+    def cleanup_references(self, original_scenario):
+        pass
+
+    def __str__(self):
+        from pprint import pprint
+        return pprint.pformat(vars(self))
+
 
 class EvaluateTreeDecomposition(object):
     ALGORITHM_ID = "EvaluateTreeDecomposition"
 
-    def __init__(self, scenario, logger, parameters):
+    def __init__(self, scenario, gurobi_settings=None, logger=None):
         self.scenario = scenario
         self.logger = logger
-        self.parameters = parameters
+        # self.parameters = parameters
 
         self.runtime_preprocessing = None
         self.runtime_algorithm = None
@@ -185,7 +186,7 @@ class EvaluateTreeDecomposition(object):
 
         self.individual_execution_times = None
 
-    def init_modelcreator(self):
+    def init_model_creator(self):
         time_preprocess_start = time.clock()
 
         # TODO: Any Preprocessing goes here
@@ -223,3 +224,6 @@ class EvaluateTreeDecomposition(object):
         )
 
         return result
+
+    def cleanup_references(self, original_scenario):
+        pass
