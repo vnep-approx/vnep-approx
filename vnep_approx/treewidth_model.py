@@ -540,8 +540,22 @@ class ShortestValidPathsComputer(object):
         self.edge_mapping_invalidities = False
 
     def compute(self):
+        self.number_of_nodes = len(self.substrate.nodes)
+        self.distance = np.full(self.number_of_nodes, np.inf, dtype=np.float64)
+        self.predecessor = np.full(self.number_of_nodes, -1, dtype=np.int32)
+
+        self.edge_set_id_to_edge_set = self.valid_mapping_restriction_computer.get_edge_set_mapping()
+        self.number_of_valid_edge_sets = self.valid_mapping_restriction_computer.get_number_of_different_edge_sets()
+        self.valid_sedge_costs = {id: {} for id in range(self.number_of_valid_edge_sets)}
+        self.valid_sedge_pred = {id: {} for id in range(self.number_of_valid_edge_sets)}
+
+
         self._prepare_numeric_graph()
         self._compute_valid_edge_mapping_costs()
+
+    def recompute_with_new_costs(self, new_edge_costs):
+        self.edge_costs = new_edge_costs
+        self.compute()
 
     def _prepare_numeric_graph(self):
         #prepare and store information on "numeric graph"
@@ -574,63 +588,41 @@ class ShortestValidPathsComputer(object):
 
     def _compute_valid_edge_mapping_costs(self):
 
-        edge_set_id_to_edge_set = self.valid_mapping_restriction_computer.get_edge_set_mapping()
-        number_of_valid_edge_sets = self.valid_mapping_restriction_computer.get_number_of_different_edge_sets()
+        for edge_set_index in range(self.number_of_valid_edge_sets):
 
-        self.valid_sedge_costs = {id : {} for id in range(number_of_valid_edge_sets)}
-        # self.valid_sedge_paths = {id : {} for id in range(number_of_valid_edge_sets)}
-        self.valid_sedge_pred = {id : {} for id in range(number_of_valid_edge_sets)}
+            out_neighbors_with_cost = self._compute_substrate_edge_abstraction_with_integer_nodes(self.edge_set_id_to_edge_set[edge_set_index])
 
-        number_of_nodes = len(self.substrate.nodes)
-
-        distance = np.full(number_of_nodes, np.inf, dtype=np.float64)
-        predecessor = np.full(number_of_nodes, -1, dtype=np.int32)
-
-        for edge_set_index in range(number_of_valid_edge_sets):
-
-            out_neighbors_with_cost = self._compute_substrate_edge_abstraction_with_integer_nodes(edge_set_id_to_edge_set[edge_set_index])
-
-            for num_source_node in range(number_of_nodes):
+            for num_source_node in range(self.number_of_nodes):
 
                 #reinitialize it
-                distance.fill(np.inf)
-                predecessor.fill(-1)
+                self.distance.fill(np.inf)
+                self.predecessor.fill(-1)
 
                 queue = [(0.0, (num_source_node, num_source_node))]
                 while queue:
                     dist, (num_node, num_predecessor) = heappop(queue)
-                    if predecessor[num_node] == -1:
-                        distance[num_node] = dist
-                        predecessor[num_node] = num_predecessor
+                    if self.predecessor[num_node] == -1:
+                        self.distance[num_node] = dist
+                        self.predecessor[num_node] = num_predecessor
 
                         for num_neighbor, edge_cost in out_neighbors_with_cost[num_node]:
-                            if predecessor[num_neighbor] == -1:
+                            if self.predecessor[num_neighbor] == -1:
                                 heappush(queue, (dist + edge_cost, (num_neighbor, num_node)))
 
-                for num_target_node in range(number_of_nodes):
-                    #print("{} of {}".format(num_target_node, number_of_nodes))
-                    if distance[num_target_node] != np.inf:
-                        # u = num_target_node
-                        # path = []
-                        # while u != num_source_node:
-                        #     path.append((num_id_to_snode_id[predecessor[u]], num_id_to_snode_id[u]))
-                        #     u = predecessor[u]
-
-                        self.valid_sedge_costs[edge_set_index][(self.num_id_to_snode_id[num_source_node], self.num_id_to_snode_id[num_target_node])] = distance[num_target_node]
-                        # self.valid_sedge_paths[edge_set_index][(num_id_to_snode_id[num_source_node], num_id_to_snode_id[num_target_node])] = path
+                for num_target_node in range(self.number_of_nodes):
+                    if self.distance[num_target_node] != np.inf:
+                        self.valid_sedge_costs[edge_set_index][(self.num_id_to_snode_id[num_source_node], self.num_id_to_snode_id[num_target_node])] = self.distance[num_target_node]
                     else:
                         self.valid_sedge_costs[edge_set_index][(self.num_id_to_snode_id[num_source_node], self.num_id_to_snode_id[num_target_node])] = np.nan
-                        # self.valid_sedge_paths[edge_set_index][(num_id_to_snode_id[num_source_node], num_id_to_snode_id[num_target_node])] = None
                         self.edge_mapping_invalidities = True
 
-                converted_pred_dict = {self.num_id_to_snode_id[num_node] : self.num_id_to_snode_id[predecessor[num_node]] if predecessor[num_node] != -1 else None for num_node in range(number_of_nodes)  }
+                converted_pred_dict = {self.num_id_to_snode_id[num_node] : self.num_id_to_snode_id[self.predecessor[num_node]] if self.predecessor[num_node] != -1 else None for num_node in range(self.number_of_nodes)  }
                 self.valid_sedge_pred[edge_set_index][self.num_id_to_snode_id[num_source_node]] = converted_pred_dict
 
         request_edge_to_edge_set_id = self.valid_mapping_restriction_computer.get_reqedge_to_edgeset_id_mapping()
 
         for request_edge, edge_set_id_to_edge_set in request_edge_to_edge_set_id.iteritems():
             self.valid_sedge_costs[request_edge] = self.valid_sedge_costs[edge_set_id_to_edge_set]
-            # self.valid_sedge_paths[request_edge] = self.valid_sedge_paths[edge_set_id_to_edge_set]
             self.valid_sedge_pred[request_edge] = self.valid_sedge_pred[edge_set_id_to_edge_set]
 
 
@@ -774,8 +766,6 @@ class OptimizedDynVMPNode(object):
         self._initialize_validity_array()
         self.mapping_costs = np.full(self.number_of_potential_node_mappings, 0.0, dtype=np.float32)
         self.mapping_costs[~self.validity_array] = np.nan
-        print "Costs array of {} has {} many nan entries".format(self.treenode,
-                                                                      np.count_nonzero(np.isnan(self.mapping_costs)))
 
 
     def _initialize_validity_array(self):
@@ -792,7 +782,6 @@ class OptimizedDynVMPNode(object):
                                                                                                           reqedge_target: mapping_of_target})
 
                         self.validity_array[index_list_to_set_to_false] = False
-        print "Validity array of {} has {} many valid entries".format(self.treenode, np.count_nonzero(self.validity_array))
 
 
     def initialize_corresponding_to_neighbors(self):
@@ -907,7 +896,7 @@ class OptimizedDynVMPNode(object):
 
         self.mapping_costs += np.dot(self.optdynvmp_parent.node_costs_array, self.local_node_cost_weights)
         for (edge_set_id, local_edge_cost_update_indices_array, local_edge_cost_update_weights_array) in self.local_edge_cost_update_list:
-            self.mapping_costs += np.einsum('ij,ij->i',self.optdynvmp_parent.edge_costs_array[edge_set_id][local_edge_cost_update_indices_array], local_edge_cost_update_weights_array)
+            self.mapping_costs += np.einsum('ij,ij->i',self.optdynvmp_parent.edge_costs_arrays[edge_set_id][local_edge_cost_update_indices_array], local_edge_cost_update_weights_array)
 
     def _apply_cost_propagation_forget_node(self):
         if self.nodetype != NodeType.Forget:
@@ -935,8 +924,8 @@ class OptimizedDynVMPNode(object):
         else:
             raise ValueError("Don't know whats going on here!")
 
-
-
+    def reinitialize(self):
+        self.mapping_costs[self.validity_array] = 0.0
 
 
 class OptimizedDynVMP(object):
@@ -953,16 +942,16 @@ class OptimizedDynVMP(object):
         self.vmrc = ValidMappingRestrictionComputer(substrate=substrate, request=request)
         self.svpc = ShortestValidPathsComputer(substrate=substrate, request=request, valid_mapping_restriction_computer=self.vmrc, edge_costs=self.sedge_costs)
 
-    def _initialize_costs(self, initial_snode_costs, initial_sedge_costs):
-        if initial_snode_costs is None:
+    def _initialize_costs(self, snode_costs, sedge_costs):
+        if snode_costs is None:
             self.snode_costs = {snode: 1.0 for snode in self.substrate.nodes}
         else:
-            self.snode_costs = {snode: initial_snode_costs[snode] for snode in initial_snode_costs.keys()}
+            self.snode_costs = {snode: snode_costs[snode] for snode in snode_costs.keys()}
 
-        if initial_sedge_costs is None:
+        if sedge_costs is None:
             self.sedge_costs = {sedge: 1.0 for sedge in self.substrate.edges}
         else:
-            self.sedge_costs = {sedge: initial_sedge_costs[sedge] for sedge in initial_sedge_costs.keys()}
+            self.sedge_costs = {sedge: sedge_costs[sedge] for sedge in sedge_costs.keys()}
 
         self._max_demand = max([self.request.get_node_demand(reqnode) for reqnode in self.request.nodes] +
                                [self.request.get_edge_demand(reqedge) for reqedge in self.request.edges])
@@ -981,23 +970,14 @@ class OptimizedDynVMP(object):
         self.sorted_snodes = sorted(list(self.substrate.nodes))
         self.sorted_snode_index = {snode : self.sorted_snodes.index(snode) for snode in self.sorted_snodes}
 
-        number_of_nodes = len(self.sorted_snodes)
+        self.number_of_nodes = len(self.sorted_snodes)
         self.snode_index = {snode : self.sorted_snodes.index(snode) for snode in self.substrate.nodes}
-        self.sedge_pair_index = {(snode_1, snode_2) : self.snode_index[snode_1] * number_of_nodes + self.snode_index[snode_2]   #the plus one is important as the 0-th entry always holds 0
+        self.sedge_pair_index = {(snode_1, snode_2) : self.snode_index[snode_1] * self.number_of_nodes + self.snode_index[snode_2]   #the plus one is important as the 0-th entry always holds 0
                                  for (snode_1,snode_2) in itertools.product(self.sorted_snodes, self.sorted_snodes)}
 
-        self.node_costs_array = np.full(len(self.sorted_snodes), 0.0, dtype=np.float32)
-        for node_index, snode in enumerate(self.sorted_snodes):
-            self.node_costs_array[node_index] = self.snode_costs[snode]
-
-        self.edge_costs_array = []
-        for edge_set_index in range(self.vmrc.get_number_of_different_edge_sets()):
-            self.edge_costs_array.append(np.full(number_of_nodes*number_of_nodes+1, 0.0, dtype=np.float32))
-            for node_pair_index, (snode_1, snode_2) in enumerate(itertools.product(self.sorted_snodes, self.sorted_snodes)):
-                # if np.isnan(self.svpc.valid_sedge_costs[edge_set_index][(snode_1, snode_2)]):
-                #     self.edge_costs_array[edge_set_index][node_pair_index+1] = self._mapping_cost_bound
-                # else:
-                self.edge_costs_array[edge_set_index][node_pair_index] = self.svpc.valid_sedge_costs[edge_set_index][(snode_1, snode_2)]
+        self.node_costs_array = np.empty(len(self.sorted_snodes), dtype=np.float32)
+        self.edge_costs_arrays = [np.empty(self.number_of_nodes * self.number_of_nodes, dtype=np.float32) for x in range(self.vmrc.get_number_of_different_edge_sets())]
+        self._initialize_cost_arrays()
 
         self.dynvmp_tree_nodes = {}
         for t in self.ssntda.post_order_traversal:
@@ -1007,6 +987,19 @@ class OptimizedDynVMP(object):
         for t in self.ssntda.post_order_traversal:
             self.dynvmp_tree_nodes[t].initialize_corresponding_to_neighbors()
             self.dynvmp_tree_nodes[t].initialize_local_cost_updates_and_selection_matrices()
+
+    def _initialize_cost_arrays(self):
+        self.node_costs_array.fill(0.0)
+        for node_index, snode in enumerate(self.sorted_snodes):
+            self.node_costs_array[node_index] = self.snode_costs[snode]
+
+        for edge_set_index in range(self.vmrc.get_number_of_different_edge_sets()):
+            current_edge_costs_array = self.edge_costs_arrays[edge_set_index]
+            current_edge_costs_array.fill(0.0)
+            for node_pair_index, (snode_1, snode_2) in enumerate(
+                    itertools.product(self.sorted_snodes, self.sorted_snodes)):
+                current_edge_costs_array[node_pair_index] = self.svpc.valid_sedge_costs[edge_set_index][
+                    (snode_1, snode_2)]
 
     def compute_solution(self):
         for t in self.ssntda.post_order_traversal:
@@ -1031,13 +1024,10 @@ class OptimizedDynVMP(object):
         for reqedge, mapping_thereof in reqedge_mappings.iteritems():
             result_mapping.map_edge(reqedge, mapping_thereof)
 
-        print "Result of cost {} is...\n\t{}".format(root_cost, result_mapping)
         return root_cost, result_mapping
 
     def _reconstruct_edge_mapping(self, reqedge, source_mapping, target_mapping):
         reqedge_predecessors = self.svpc.valid_sedge_pred[reqedge][source_mapping]
-        print "predecessors: {}".format(reqedge_predecessors)
-
         u = target_mapping
         path = []
         while u != source_mapping:
@@ -1048,12 +1038,9 @@ class OptimizedDynVMP(object):
         return path
 
     def _recover_node_mapping(self):
-        print "Trying to recover mapping."
         fixed_node_mappings = {}
         root_cost = None
         for treenode in self.ssntda.pre_order_traversal:
-
-            print "\n\nFixed mappings are {}".format(fixed_node_mappings)
 
             # find mapping of least cost
             dynvmp_treenode = self.dynvmp_tree_nodes[treenode]
@@ -1068,9 +1055,8 @@ class OptimizedDynVMP(object):
                 if dynvmp_treenode.nodetype == NodeType.Root:
                     root_cost = dynvmp_treenode.mapping_costs[potential_node_mapping_indices[best_mapping_index]]
                     if root_cost >= self._mapping_cost_bound:
-                        print "this cannot be ever optimal!"
+                        # this should never happen
                         return None, None
-                    print "Optimal cost at root is: {}".format(root_cost)
                 corresponding_node_mapping = dynvmp_treenode.get_node_mapping_based_on_index(
                     potential_node_mapping_indices[best_mapping_index])
             except ValueError:
@@ -1091,8 +1077,13 @@ class OptimizedDynVMP(object):
         return root_cost, fixed_node_mappings
 
     def reinitialize(self, new_node_costs, new_edge_costs):
-        pass
 
+        self._initialize_costs(new_node_costs, new_edge_costs)
+        self.svpc.recompute_with_new_costs(new_edge_costs)
+        self._initialize_cost_arrays()
+
+        for t in self.ssntda.post_order_traversal:
+            self.dynvmp_tree_nodes[t].reinitialize()
 
 #
 #   OLD

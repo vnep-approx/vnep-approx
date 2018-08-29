@@ -142,7 +142,7 @@ def test_shortest_valid_paths_computer(request_id):
 
 # TEST OptimizedDynVMP
 @pytest.mark.parametrize("request_id",
-                         example_requests_small)
+                         example_requests)
 def test_opt_dynvmp(request_id):
     req = create_test_request(request_id, set_allowed_nodes=False)
     sub = create_test_substrate_large()
@@ -205,9 +205,19 @@ def test_opt_dynvmp(request_id):
                                                  req,
                                                  sntd)
     opt_dynvmp.initialize_data_structures()
-    print "Really usable edges are..."
-    for reqedge in req.edges:
-        "\t allowed edges of {} are {}".format(reqedge, opt_dynvmp.vmrc.get_allowed_sedge_set(reqedge))
+    opt_dynvmp.compute_solution()
+    result_mapping = opt_dynvmp.recover_mapping()
+    print "Returned mapping! Namely, the following: {}".format(result_mapping)
+
+    #change costs
+    snode_costs = opt_dynvmp.snode_costs
+    sedge_costs = opt_dynvmp.sedge_costs
+    for snode in snode_costs.keys():
+        snode_costs[snode] *= 2
+    for sedge in sedge_costs.keys():
+        sedge_costs[sedge] *= 2
+
+    opt_dynvmp.reinitialize(snode_costs, sedge_costs)
     opt_dynvmp.compute_solution()
     result_mapping = opt_dynvmp.recover_mapping()
     print "Returned mapping! Namely, the following: {}".format(result_mapping)
@@ -215,8 +225,8 @@ def test_opt_dynvmp(request_id):
 
 @pytest.mark.parametrize("request_id", example_requests)
 @pytest.mark.parametrize("random_seed", [0])
-@pytest.mark.parametrize("allowed_nodes_ratio", [0.1, 0.2, 0.3, 0.4])  # avoid too large values because of memory footprint
-@pytest.mark.parametrize("allowed_edges_ratio", [0.1, 0.2, 0.4, 0.6, 0.8, 1.0])
+@pytest.mark.parametrize("allowed_nodes_ratio", [0.1, 0.3, 0.5])  # avoid too large values because of memory footprint
+@pytest.mark.parametrize("allowed_edges_ratio", [0.1, 0.2, 0.3, 0.4, 0.6, 0.8, 1.0])
 def test_opt_dynvmp_and_classic_mcf_agree_for_unambiguous_scenario(
         request_id, random_seed, allowed_nodes_ratio, allowed_edges_ratio
 ):
@@ -236,36 +246,72 @@ def test_opt_dynvmp_and_classic_mcf_agree_for_unambiguous_scenario(
     for ij in req.edges:
         req.edge[ij]["allowed_edges"] = random.sample(list(sub.edges), num_allowed_edges)
 
-    # randomize all costs to force unambiguous cost-optimal embedding
-    for u in sub.nodes:
-        for t in sub.get_supported_node_types(u):
-            sub.node[u]["cost"][t] = random.random()
-    for uv in sub.edges:
-        sub.edge[uv]["cost"] = random.random()
+
+    snode_costs = {}
+    sedge_costs = {}
+
+    def randomize_substrate_costs():
+        # randomize all costs to force unambiguous cost-optimal embedding
+        for u in sub.nodes:
+            for t in sub.get_supported_node_types(u):
+                sub.node[u]["cost"][t] = random.random()
+                snode_costs[u] = sub.node[u]["cost"][t]
+        for uv in sub.edges:
+            sub.edge[uv]["cost"] = random.random()
+            sedge_costs[uv] = sub.edge[uv]["cost"]
+
+    randomize_substrate_costs()
+
+
+    td_comp = treewidth_model.TreeDecompositionComputation(req)
+    tree_decomp = td_comp.compute_tree_decomposition()
+    sntd = treewidth_model.SmallSemiNiceTDArb(tree_decomp, req)
+    opt_dynvmp = treewidth_model.OptimizedDynVMP(sub, req, sntd, snode_costs, sedge_costs)
+    times = []
+    start_time = time.time()
+    opt_dynvmp.initialize_data_structures()
+    opt_dynvmp.compute_solution()
+    root_cost, mapping = opt_dynvmp.recover_mapping()
+    times.append(time.time()-start_time)
+
+    number_of_tests = 10
+
+    for x in range(number_of_tests):
+        def compare_solutions():
+            if root_cost is not None:  # solution exists
+                assert gurobi_solution is not None
+                gurobi_obj = gurobi_solution.status.objValue
+                assert abs(root_cost - gurobi_obj) <= 0.0001
+                assert mapping.mapping_nodes == gurobi_solution.solution.request_mapping[req].mapping_nodes
+                assert mapping.mapping_edges == gurobi_solution.solution.request_mapping[req].mapping_edges
+            else:
+                assert gurobi_solution is None
+
+        gurobi = mip.ClassicMCFModel(dm.Scenario("test", sub, [req], objective=dm.Objective.MIN_COST))
+        gurobi.init_model_creator()
+        gurobi_solution = gurobi.compute_integral_solution()
+
+        compare_solutions()
+
+        randomize_substrate_costs()
+
+        start_time = time.time()
+        opt_dynvmp.reinitialize(snode_costs, sedge_costs)
+        opt_dynvmp.compute_solution()
+        root_cost, mapping = opt_dynvmp.recover_mapping()
+        times.append(time.time() - start_time)
 
     gurobi = mip.ClassicMCFModel(dm.Scenario("test", sub, [req], objective=dm.Objective.MIN_COST))
     gurobi.init_model_creator()
     gurobi_solution = gurobi.compute_integral_solution()
 
-    td_comp = treewidth_model.TreeDecompositionComputation(req)
-    tree_decomp = td_comp.compute_tree_decomposition()
-    sntd = treewidth_model.SmallSemiNiceTDArb(tree_decomp, req)
-    opt_dynvmp = treewidth_model.OptimizedDynVMP(sub, req, sntd)
+    compare_solutions()
 
-    # Bypass cost initialization in OptimizedDynVMP.__init__
-    opt_dynvmp.snode_costs = {u: sub.node[u]["cost"][node_type] for u in sub.nodes}
-    opt_dynvmp.sedge_costs = {uv: sub.edge[uv]["cost"] for uv in sub.edges}
-    opt_dynvmp.svpc.edge_costs = {uv: sub.edge[uv]["cost"] for uv in sub.edges}
-
-    opt_dynvmp.initialize_data_structures()
-    opt_dynvmp.compute_solution()
-
-    root_cost, mapping = opt_dynvmp.recover_mapping()
-    if root_cost is not None:  # solution exists
-        assert gurobi_solution is not None
-        gurobi_obj = gurobi_solution.status.objValue
-        assert abs(root_cost - gurobi_obj) <= 0.0001
-        assert mapping.mapping_nodes == gurobi_solution.solution.request_mapping[req].mapping_nodes
-        assert mapping.mapping_edges == gurobi_solution.solution.request_mapping[req].mapping_edges
-    else:
-        assert gurobi_solution is None
+    initial_computation_time = times[0]
+    other_computation_times = times[1:]
+    average_of_others = sum(other_computation_times) / float(len(other_computation_times))
+    print("      Runtime of initial computation:  {:02.4f} s\n"
+          "Runtime of later computations (avg.):  {:02.4f} s\n"
+          "               This is a speed-up of:  {:02.2f} times".format(initial_computation_time,
+                                                                   average_of_others,
+                                                                   initial_computation_time/average_of_others))
