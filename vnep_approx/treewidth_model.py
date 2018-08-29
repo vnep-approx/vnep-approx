@@ -3,6 +3,7 @@ import os
 import subprocess
 from collections import deque
 import numpy as np
+from numpy.core.umath_tests import inner1d
 from heapq import heappush, heappop
 
 
@@ -456,6 +457,7 @@ class ValidMappingRestrictionComputer(object):
 
         self.edge_set_to_edge_set_id = {}
         self.request_edge_to_edge_set_id = {}
+        self.edge_set_id_to_request_edges = {}
         self.edge_set_id_to_edge_set = {}
         self.number_of_different_edge_sets = 0
 
@@ -501,10 +503,12 @@ class ValidMappingRestrictionComputer(object):
             frozen_edge_set = frozenset(self.allowed_edges[reqedge])
             if frozen_edge_set in self.edge_set_to_edge_set_id:
                 self.request_edge_to_edge_set_id[reqedge] = self.edge_set_to_edge_set_id[frozen_edge_set]
+                self.edge_set_id_to_request_edges[self.request_edge_to_edge_set_id[reqedge]].append(reqedge)
             else:
                 self.edge_set_id_to_edge_set[self.number_of_different_edge_sets] = frozen_edge_set
                 self.edge_set_to_edge_set_id[frozen_edge_set] = self.number_of_different_edge_sets
                 self.request_edge_to_edge_set_id[reqedge] = self.number_of_different_edge_sets
+                self.edge_set_id_to_request_edges[self.number_of_different_edge_sets] = [reqedge]
                 self.number_of_different_edge_sets += 1
 
     def get_allowed_snode_list(self, reqnode):
@@ -518,6 +522,9 @@ class ValidMappingRestrictionComputer(object):
 
     def get_reqedge_to_edgeset_id_mapping(self):
         return self.request_edge_to_edge_set_id
+
+    def get_edgeset_id_to_reqedge_mapping(self):
+        return self.edge_set_id_to_request_edges
 
     def get_number_of_different_edge_sets(self):
         return self.number_of_different_edge_sets
@@ -819,37 +826,51 @@ class OptimizedDynVMPNode(object):
 
     def initialize_local_cost_updates_and_selection_matrices(self):
         number_of_nodes = len(self.substrate.nodes)
+
         if self.nodetype != NodeType.Forget:
 
-            reqedge_to_edge_set_id_mapping = self.vmrc.get_reqedge_to_edgeset_id_mapping()
-
+            #NODE COSTS
             self.local_node_cost_weights = np.full((number_of_nodes, self.number_of_potential_node_mappings), 0.0, dtype=np.float32)
-            self.local_edge_cost_weights = [None] * self.vmrc.get_number_of_different_edge_sets()
 
             for reqnode in self.forgotten_virtual_elements_out_neigbor[0]:
                 for snode in self.allowed_nodes[reqnode]:
                     indices = self.get_indices_of_mappings_under_restrictions({reqnode: snode})
                     self.local_node_cost_weights[self.optdynvmp_parent.sorted_snode_index[snode], indices] += self.request.get_node_demand(reqnode)
 
-            self.temp_edge_cost_update_table = {edge_set_id : None for edge_set_id in range(self.vmrc.get_number_of_different_edge_sets())}
+            #EDGE COSTS
 
-            for reqedge in self.forgotten_virtual_elements_out_neigbor[1]:
-                req_source, req_target = reqedge
+            edgeset_id_to_reqedges_mapping = self.vmrc.get_edgeset_id_to_reqedge_mapping()
+            edgeset_id_to_forgotten_reqedges_mapping = {edge_set_id : [reqedge for reqedge in edgeset_id_to_reqedges_mapping[edge_set_id] if reqedge in self.forgotten_virtual_elements_out_neigbor[1]] for edge_set_id in edgeset_id_to_reqedges_mapping.keys()}
 
-                edge_set_index_of_edge = reqedge_to_edge_set_id_mapping[reqedge]
+            self.local_edge_cost_length = {edge_set_id: int(len(edgeset_id_to_forgotten_reqedges_mapping[edge_set_id])) for edge_set_id
+                                          in edgeset_id_to_reqedges_mapping.keys()}
 
-                if self.local_edge_cost_weights[edge_set_index_of_edge] is None:
-                    current_edge_cost_weights = np.full((number_of_nodes * number_of_nodes, self.number_of_potential_node_mappings), 0.0, dtype=np.float32)
-                    self.local_edge_cost_weights[edge_set_index_of_edge] = current_edge_cost_weights
-                else:
-                    current_edge_cost_weights = self.local_edge_cost_weights[edge_set_index_of_edge]
-                    temp_edge_cost_update_table = self.temp_edge_cost_update_table[edge_set_index_of_edge]
+            self.local_edge_cost_update_list = []
 
-                for source_mapping, target_mapping in itertools.product(self.allowed_nodes[req_source], self.allowed_nodes[req_target]):
-                    indices = self.get_indices_of_mappings_under_restrictions({req_source: source_mapping,
-                                                                               req_target: target_mapping})
+            for edge_set_id in edgeset_id_to_reqedges_mapping.keys():
+                if self.local_edge_cost_length[edge_set_id] > 0:
 
-                    current_edge_cost_weights[self.optdynvmp_parent.sedge_pair_index[(source_mapping, target_mapping)], indices] += self.request.get_edge_demand(reqedge)
+                    local_edge_cost_indices_array = np.full(
+                        (self.number_of_potential_node_mappings, self.local_edge_cost_length[edge_set_id]), 0,
+                        dtype=np.int32)
+                    local_edge_cost_weights_array = np.full(
+                        ( self.number_of_potential_node_mappings, self.local_edge_cost_length[edge_set_id]), 0.0,
+                        dtype=np.float32)
+
+                    for reqedge_index, reqedge in enumerate(edgeset_id_to_forgotten_reqedges_mapping[edge_set_id]):
+                        req_source, req_target = reqedge
+
+                        for source_mapping, target_mapping in itertools.product(self.allowed_nodes[req_source], self.allowed_nodes[req_target]):
+                            sedge_pair_index = self.optdynvmp_parent.sedge_pair_index[(source_mapping, target_mapping)]
+
+                            indices = self.get_indices_of_mappings_under_restrictions({req_source: source_mapping,
+                                                                                       req_target: target_mapping})
+
+                            local_edge_cost_indices_array[indices, reqedge_index] = sedge_pair_index
+
+                            local_edge_cost_weights_array[indices, reqedge_index] += self.request.get_edge_demand(reqedge)
+
+                    self.local_edge_cost_update_list.append((edge_set_id, local_edge_cost_indices_array, local_edge_cost_weights_array))
 
         if self.nodetype == NodeType.Forget:
             if len(self.in_neighbors) != 1:
@@ -885,10 +906,8 @@ class OptimizedDynVMPNode(object):
             raise ValueError("This function should never be called for a Forget Node!")
 
         self.mapping_costs += np.dot(self.optdynvmp_parent.node_costs_array, self.local_node_cost_weights)
-        for edge_set_index, edge_cost_weights in enumerate(self.local_edge_cost_weights):
-            if edge_cost_weights is None:
-                continue
-            self.mapping_costs += np.dot(self.optdynvmp_parent.edge_costs_array[edge_set_index], edge_cost_weights)
+        for (edge_set_id, local_edge_cost_update_indices_array, local_edge_cost_update_weights_array) in self.local_edge_cost_update_list:
+            self.mapping_costs += np.einsum('ij,ij->i',self.optdynvmp_parent.edge_costs_array[edge_set_id][local_edge_cost_update_indices_array], local_edge_cost_update_weights_array)
 
     def _apply_cost_propagation_forget_node(self):
         if self.nodetype != NodeType.Forget:
@@ -964,7 +983,7 @@ class OptimizedDynVMP(object):
 
         number_of_nodes = len(self.sorted_snodes)
         self.snode_index = {snode : self.sorted_snodes.index(snode) for snode in self.substrate.nodes}
-        self.sedge_pair_index = {(snode_1, snode_2) : self.snode_index[snode_1] * number_of_nodes + self.snode_index[snode_2]
+        self.sedge_pair_index = {(snode_1, snode_2) : self.snode_index[snode_1] * number_of_nodes + self.snode_index[snode_2]   #the plus one is important as the 0-th entry always holds 0
                                  for (snode_1,snode_2) in itertools.product(self.sorted_snodes, self.sorted_snodes)}
 
         self.node_costs_array = np.full(len(self.sorted_snodes), 0.0, dtype=np.float32)
@@ -973,12 +992,12 @@ class OptimizedDynVMP(object):
 
         self.edge_costs_array = []
         for edge_set_index in range(self.vmrc.get_number_of_different_edge_sets()):
-            self.edge_costs_array.append(np.full(number_of_nodes*number_of_nodes, 0.0, dtype=np.float32))
+            self.edge_costs_array.append(np.full(number_of_nodes*number_of_nodes+1, 0.0, dtype=np.float32))
             for node_pair_index, (snode_1, snode_2) in enumerate(itertools.product(self.sorted_snodes, self.sorted_snodes)):
-                if np.isnan(self.svpc.valid_sedge_costs[edge_set_index][(snode_1, snode_2)]):
-                    self.edge_costs_array[edge_set_index][node_pair_index] = self._mapping_cost_bound
-                else:
-                    self.edge_costs_array[edge_set_index][node_pair_index] = self.svpc.valid_sedge_costs[edge_set_index][(snode_1, snode_2)]
+                # if np.isnan(self.svpc.valid_sedge_costs[edge_set_index][(snode_1, snode_2)]):
+                #     self.edge_costs_array[edge_set_index][node_pair_index+1] = self._mapping_cost_bound
+                # else:
+                self.edge_costs_array[edge_set_index][node_pair_index] = self.svpc.valid_sedge_costs[edge_set_index][(snode_1, snode_2)]
 
         self.dynvmp_tree_nodes = {}
         for t in self.ssntda.post_order_traversal:
