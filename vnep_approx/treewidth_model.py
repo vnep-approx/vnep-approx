@@ -158,7 +158,7 @@ class TreeDecomposition(UndirectedGraph):
 
     @property
     def width(self):
-        return max(len(bag) for bag in self.node_bag_dict)
+        return max(len(bag) for bag in self.node_bag_dict.values()) - 1
 
     def get_bag_intersection(self, t1, t2):
         return self.node_bag_dict[t1] & self.node_bag_dict[t2]
