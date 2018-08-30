@@ -5,7 +5,8 @@ import numpy as np
 
 from alib import mip
 from alib import datamodel as dm
-from test_data.request_test_data import create_test_request, example_requests, example_requests_small, create_test_substrate_large
+from test_data.request_test_data import create_test_request, example_requests, example_requests_small, \
+    create_test_substrate_large
 from test_data.substrate_test_data import create_test_substrate
 
 import random
@@ -135,9 +136,12 @@ def test_shortest_valid_paths_computer(request_id):
             for snode_target in sub.nodes:
                 # print svpc.valid_sedge_costs[reqedge][(snode_source, snode_target)]
                 # print sub.get_shortest_paths_cost(snode_source, snode_target)
-                assert svpc.valid_sedge_costs[reqedge][(snode_source, snode_target)] == pytest.approx(sub.get_shortest_paths_cost(snode_source, snode_target))
+                assert svpc.valid_sedge_costs[reqedge][(snode_source, snode_target)] == pytest.approx(
+                    sub.get_shortest_paths_cost(snode_source, snode_target))
 
-    print("\nComputation times were:\n\tBellman-Ford: {}\n\tDijkstra:     {}\n\n\tSpeedup by using Dijkstra: {:2.2f} (<1 is bad)".format(bellman_ford_time, dijkstra_time, (bellman_ford_time / dijkstra_time)))
+    print(
+        "\nComputation times were:\n\tBellman-Ford: {}\n\tDijkstra:     {}\n\n\tSpeedup by using Dijkstra: {:2.2f} (<1 is bad)".format(
+            bellman_ford_time, dijkstra_time, (bellman_ford_time / dijkstra_time)))
 
 
 # TEST OptimizedDynVMP
@@ -172,12 +176,12 @@ def test_opt_dynvmp(request_id):
         selected_nodes = []
         while len(selected_nodes) == 0:
             print "selected nodes are {}".format(selected_nodes)
-            selected_nodes = valid_reqnode_list[0:random.randint(30 * len(valid_reqnode_list) / 40, len(valid_reqnode_list))]
+            selected_nodes = valid_reqnode_list[0:random.randint(10, len(valid_reqnode_list))]
         req.set_allowed_nodes(reqnode, selected_nodes)
         print "Allowd nodes for {} are {}.".format(reqnode, req.get_allowed_nodes(reqnode))
     for reqedge in req.edges:
         random.shuffle(sedge_list)
-        req.set_allowed_edges(reqedge, sedge_list[0:random.randint(30 * len(sedge_list) / 40, len(sedge_list))])
+        req.set_allowed_edges(reqedge, sedge_list[0:random.randint(20, len(sedge_list))])
         print "Allowd edges for {} are {}.".format(reqedge, req.get_allowed_edges(reqedge))
 
     # random edge costs
@@ -209,7 +213,7 @@ def test_opt_dynvmp(request_id):
     result_mapping = opt_dynvmp.recover_mapping()
     print "Returned mapping! Namely, the following: {}".format(result_mapping)
 
-    #change costs
+    # change costs
     snode_costs = opt_dynvmp.snode_costs
     sedge_costs = opt_dynvmp.sedge_costs
     for snode in snode_costs.keys():
@@ -246,7 +250,6 @@ def test_opt_dynvmp_and_classic_mcf_agree_for_unambiguous_scenario(
     for ij in req.edges:
         req.edge[ij]["allowed_edges"] = random.sample(list(sub.edges), num_allowed_edges)
 
-
     snode_costs = {}
     sedge_costs = {}
 
@@ -262,19 +265,20 @@ def test_opt_dynvmp_and_classic_mcf_agree_for_unambiguous_scenario(
 
     randomize_substrate_costs()
 
-
     td_comp = treewidth_model.TreeDecompositionComputation(req)
     tree_decomp = td_comp.compute_tree_decomposition()
     sntd = treewidth_model.SmallSemiNiceTDArb(tree_decomp, req)
     opt_dynvmp = treewidth_model.OptimizedDynVMP(sub, req, sntd, snode_costs, sedge_costs)
-    times = []
+    times_dynvmp = []
     start_time = time.time()
     opt_dynvmp.initialize_data_structures()
     opt_dynvmp.compute_solution()
     root_cost, mapping = opt_dynvmp.recover_mapping()
-    times.append(time.time()-start_time)
+    times_dynvmp.append(time.time() - start_time)
 
     number_of_tests = 10
+
+    times_gurobi = []
 
     for x in range(number_of_tests):
         def compare_solutions():
@@ -287,9 +291,11 @@ def test_opt_dynvmp_and_classic_mcf_agree_for_unambiguous_scenario(
             else:
                 assert gurobi_solution is None
 
+        start_time = time.time()
         gurobi = mip.ClassicMCFModel(dm.Scenario("test", sub, [req], objective=dm.Objective.MIN_COST))
         gurobi.init_model_creator()
         gurobi_solution = gurobi.compute_integral_solution()
+        times_gurobi.append(time.time()-start_time)
 
         compare_solutions()
 
@@ -299,7 +305,7 @@ def test_opt_dynvmp_and_classic_mcf_agree_for_unambiguous_scenario(
         opt_dynvmp.reinitialize(snode_costs, sedge_costs)
         opt_dynvmp.compute_solution()
         root_cost, mapping = opt_dynvmp.recover_mapping()
-        times.append(time.time() - start_time)
+        times_dynvmp.append(time.time() - start_time)
 
     gurobi = mip.ClassicMCFModel(dm.Scenario("test", sub, [req], objective=dm.Objective.MIN_COST))
     gurobi.init_model_creator()
@@ -307,11 +313,22 @@ def test_opt_dynvmp_and_classic_mcf_agree_for_unambiguous_scenario(
 
     compare_solutions()
 
-    initial_computation_time = times[0]
-    other_computation_times = times[1:]
+    initial_computation_time = times_dynvmp[0]
+    other_computation_times = times_dynvmp[1:]
     average_of_others = sum(other_computation_times) / float(len(other_computation_times))
-    print("      Runtime of initial computation:  {:02.4f} s\n"
+    print("        Request graph size (|V|,|E|):  ({},{})\n"
+          "             Width of the request is:  {}\n"
+          "      Runtime of initial computation:  {:02.4f} s\n"
           "Runtime of later computations (avg.):  {:02.4f} s\n"
-          "               This is a speed-up of:  {:02.2f} times".format(initial_computation_time,
-                                                                   average_of_others,
-                                                                   initial_computation_time/average_of_others))
+          "               This is a speed-up of:  {:02.2f} times\n"
+          "               Total time in Dyn-VMP:  {:02.4f} s\n"
+          "                Total time in Gurobi:  {:02.4f} s\n"
+          "         Speedup Dyn-VMP over Gurobi:  {:02.2f} times\n".format(len(req.nodes),
+                                                                           len(req.edges),
+                                                                           sntd.width,
+                                                                           initial_computation_time,
+                                                                           average_of_others,
+                                                                           initial_computation_time / average_of_others,
+                                                                           sum(times_dynvmp),
+                                                                           sum(times_gurobi),
+                                                                           sum(times_dynvmp)/sum(times_gurobi)))

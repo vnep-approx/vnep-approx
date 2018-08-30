@@ -3,7 +3,6 @@ import os
 import subprocess
 from collections import deque
 import numpy as np
-from numpy.core.umath_tests import inner1d
 from heapq import heappush, heappop
 
 
@@ -644,16 +643,26 @@ class OptimizedDynVMPNode(object):
     '''
 
     def get_indices_of_mappings_under_restrictions(self, mapping_restrictions):
-        resulting_list_of_indices = []
-        self.get_indices_of_mappings_under_restrictions_inplace(mapping_restrictions, resulting_list_of_indices)
-        return resulting_list_of_indices
-
-    def get_indices_of_mappings_under_restrictions_inplace(self, mapping_restrictions, result_list):
         meta_information, construction_rule = self.get_construction_rule_for_indexing_mappings_under_restrictions(mapping_restrictions)
-        self.recursive_index_generation(meta_information,
-                                        construction_rule,
-                                        result_list,
-                                        parent_value=0)
+
+        return self.non_recursive_index_generation(meta_information,
+                                                   construction_rule)
+
+
+        #just for debugging; remove this later on!
+        # other_result_list = []
+        # print("\n\n\n === NEW ===")
+        # self.fill_matrix_with_mapping_indices(meta_information, construction_rule, other_result_list)
+        #
+        # print other_result_list
+        # print result_list
+        #
+        # if len(other_result_list) != len(result_list):
+        #     raise ValueError("{}\n{}\n{}\n{}".format(other_result_list, result_list, construction_rule, meta_information))
+        # for i in range(len(other_result_list)):
+        #     if other_result_list[i] != result_list[i]:
+        #         raise ValueError(
+        #             "{}\n{}\n{}\n{}".format(other_result_list, result_list, construction_rule, meta_information))
 
 
 
@@ -670,6 +679,56 @@ class OptimizedDynVMPNode(object):
 
         return meta_information, construction_rule
 
+
+    def non_recursive_index_generation(self,
+                                       meta_information,
+                                       construction_rule):
+
+        for index, (reqnode, number_of_allowed_nodes) in enumerate(meta_information):
+            self.maximum_node_indices[index] = len(construction_rule[index])
+            self.number_allowed_nodes[index] = number_of_allowed_nodes
+            if index == 0:
+                self.current_parent_values[index] = construction_rule[index][0]
+            else:
+                self.current_parent_values[index] = self.current_parent_values[index-1] * self.number_allowed_nodes[index] + construction_rule[index][0]
+            self.current_node_indices[index] = 0
+
+
+        generation_depth = len(construction_rule)-1
+        current_depth = generation_depth
+        self.current_node_indices[current_depth] -= 1
+
+        item_counter = 0
+
+        while current_depth >= 0:
+
+            self.current_node_indices[current_depth] += 1
+
+            current_node_index = self.current_node_indices[current_depth]
+            current_construction_rule = construction_rule[current_depth]
+            if current_node_index == self.maximum_node_indices[current_depth]:
+                self.current_node_indices[current_depth] = -1
+                current_depth -= 1
+            else:
+                if current_depth == generation_depth:
+                    if current_depth > 0:
+                        self.list_for_indices[item_counter] = (self.current_parent_values[current_depth - 1] * \
+                                                               self.number_allowed_nodes[current_depth] + \
+                                                               current_construction_rule[
+                                                                   current_node_index])
+                        item_counter += 1
+                    else:
+                        self.list_for_indices[item_counter] =(current_construction_rule[current_node_index])
+                        item_counter += 1
+                else:
+                    if current_depth > 0:
+                        self.current_parent_values[current_depth] = self.current_parent_values[current_depth - 1] * \
+                                                                    self.number_allowed_nodes[current_depth] + \
+                                                               current_construction_rule[current_node_index]
+                    else:
+                        self.current_parent_values[current_depth] = current_construction_rule[current_node_index]
+                    current_depth += 1
+        return self.list_for_indices[:item_counter]
 
     def recursive_index_generation(self,
                                    meta_information,
@@ -691,6 +750,63 @@ class OptimizedDynVMPNode(object):
             else:
                 #if self.validity_array[current_value]: #TODO somehow does not work when only including valid mapping indices
                 result_list.append(current_value)
+
+    def fill_matrix_with_mapping_indices(self,
+                                         mapping_restrictions,
+                                         result_array,
+                                         result_array_row=0):
+
+        meta_information, construction_rule = self.get_construction_rule_for_indexing_mappings_under_restrictions(mapping_restrictions)
+        current_node_indices = np.full(len(construction_rule), 0, dtype=np.int32)
+        maximum_node_indices = np.full(len(construction_rule), 0, dtype=np.int32)
+        number_allowed_nodes = np.full(len(construction_rule), 0, dtype=np.int32)
+        current_parent_values = np.full(len(construction_rule), 0, dtype=np.int32)
+        for index, (reqnode, number_of_allowed_nodes) in enumerate(meta_information):
+            maximum_node_indices[index] = len(construction_rule[index])
+            number_allowed_nodes[index] = number_of_allowed_nodes
+            if index == 0:
+                current_parent_values[index] = construction_rule[index][0]
+            else:
+                current_parent_values[index] = current_parent_values[index-1] * number_allowed_nodes[index] + construction_rule[index][0]
+
+
+        generation_depth = len(construction_rule)-1
+        current_depth = generation_depth
+        current_node_indices[current_depth] -= 1
+
+        result_array_column = 0
+
+        array_slice = result_array[result_array_row,:]
+
+        while current_depth >= 0:
+
+            current_node_indices[current_depth] += 1
+
+            current_node_index = current_node_indices[current_depth]
+            current_construction_rule = construction_rule[current_depth]
+            if current_node_index == maximum_node_indices[current_depth]:
+                current_node_indices[current_depth] = -1
+                current_depth -= 1
+            else:
+                if current_depth == generation_depth:
+                    if current_depth > 0:
+                        array_slice[result_array_column] = current_parent_values[current_depth - 1] * \
+                                                                              number_allowed_nodes[current_depth] + \
+                                                                              current_construction_rule[
+                                                                                  current_node_index]
+                        result_array_column +=1
+                    else:
+                        array_slice[result_array_column] = current_construction_rule[current_node_index]
+                        result_array_column += 1
+                else:
+                    if current_depth > 0:
+                        current_parent_values[current_depth] = current_parent_values[current_depth - 1] * \
+                                                               number_allowed_nodes[current_depth] + \
+                                                               current_construction_rule[current_node_index]
+                    else:
+                        current_parent_values[current_depth] = current_construction_rule[current_node_index]
+                    current_depth += 1
+
 
     def get_node_mapping_based_on_index(self, mapping_index):
         if mapping_index < 0 or mapping_index >= self.number_of_potential_node_mappings:
@@ -762,6 +878,17 @@ class OptimizedDynVMPNode(object):
         if self.number_of_potential_node_mappings < 1:
             raise ValueError("There exist no valid node mappings")
 
+        minimal_number_different_node_mappings = min([self.number_of_allowed_nodes[reqnode] for reqnode in self.contained_request_nodes])
+        maximal_size_of_index_array = self.number_of_potential_node_mappings / minimal_number_different_node_mappings
+
+        self.list_for_indices = [0]*maximal_size_of_index_array
+
+        self.current_node_indices = [0] * self.number_of_request_nodes
+        self.maximum_node_indices = [0] * self.number_of_request_nodes
+        self.number_allowed_nodes = [0] * self.number_of_request_nodes
+        self.current_parent_values = [0] * self.number_of_request_nodes
+
+
         self.validity_array = np.full(self.number_of_potential_node_mappings, True, dtype=np.bool)
         self._initialize_validity_array()
         self.mapping_costs = np.full(self.number_of_potential_node_mappings, 0.0, dtype=np.float32)
@@ -777,11 +904,11 @@ class OptimizedDynVMPNode(object):
                                                                     self.allowed_nodes[reqedge_target]):
                     if np.isnan(self.svpc.valid_sedge_costs[(reqedge_source, reqedge_target)][(mapping_of_source, mapping_of_target)]):
 
+                        list_of_indices = self.get_indices_of_mappings_under_restrictions(
+                            {reqedge_source: mapping_of_source,
+                             reqedge_target: mapping_of_target})
 
-                        index_list_to_set_to_false = self.get_indices_of_mappings_under_restrictions({reqedge_source: mapping_of_source,
-                                                                                                          reqedge_target: mapping_of_target})
-
-                        self.validity_array[index_list_to_set_to_false] = False
+                        self.validity_array[list_of_indices] = False
 
 
     def initialize_corresponding_to_neighbors(self):
@@ -823,8 +950,9 @@ class OptimizedDynVMPNode(object):
 
             for reqnode in self.forgotten_virtual_elements_out_neigbor[0]:
                 for snode in self.allowed_nodes[reqnode]:
-                    indices = self.get_indices_of_mappings_under_restrictions({reqnode: snode})
-                    self.local_node_cost_weights[self.optdynvmp_parent.sorted_snode_index[snode], indices] += self.request.get_node_demand(reqnode)
+                    list_of_indices = self.get_indices_of_mappings_under_restrictions({reqnode: snode})
+                    self.local_node_cost_weights[
+                        self.optdynvmp_parent.sorted_snode_index[snode],list_of_indices] += self.request.get_node_demand(reqnode)
 
             #EDGE COSTS
 
@@ -852,12 +980,13 @@ class OptimizedDynVMPNode(object):
                         for source_mapping, target_mapping in itertools.product(self.allowed_nodes[req_source], self.allowed_nodes[req_target]):
                             sedge_pair_index = self.optdynvmp_parent.sedge_pair_index[(source_mapping, target_mapping)]
 
-                            indices = self.get_indices_of_mappings_under_restrictions({req_source: source_mapping,
+                            list_of_indices = self.get_indices_of_mappings_under_restrictions({req_source: source_mapping,
                                                                                        req_target: target_mapping})
 
-                            local_edge_cost_indices_array[indices, reqedge_index] = sedge_pair_index
+                            local_edge_cost_indices_array[list_of_indices, reqedge_index] = sedge_pair_index
 
-                            local_edge_cost_weights_array[indices, reqedge_index] += self.request.get_edge_demand(reqedge)
+                            local_edge_cost_weights_array[list_of_indices, reqedge_index] += self.request.get_edge_demand(
+                                reqedge)
 
                     self.local_edge_cost_update_list.append((edge_set_id, local_edge_cost_indices_array, local_edge_cost_weights_array))
 
@@ -867,28 +996,39 @@ class OptimizedDynVMPNode(object):
             in_neighbor = self.in_neighbors[0]
             out_neighbor = self.out_neighbor
 
-            self.minimum_selection_pull = [list() for x in range(self.number_of_potential_node_mappings)] #incoming neighbor
-            self.minimum_selection_push = [list() for x in range(self.number_of_potential_node_mappings)] #out neighbor
+            forgotten_nodes_from_in_neighbor = in_neighbor.forgotten_virtual_elements_out_neigbor[0]
+            number_of_matching_in_neighbor_mappings = 1
+            for forgotten_reqnode in forgotten_nodes_from_in_neighbor:
+                number_of_matching_in_neighbor_mappings *= len(in_neighbor.allowed_nodes[forgotten_reqnode])
+
+            #we need to handle this a bit differently as we do not represent what gets added from a forget node towards a introduction/join node
+            number_of_matching_out_neighbor_mappings = 1
+            for reqnode in out_neighbor.contained_request_nodes:
+                if reqnode not in self.contained_request_nodes:
+                    number_of_matching_out_neighbor_mappings *= len(out_neighbor.allowed_nodes[reqnode])
+
+            self.minimum_selection_pull = np.full((self.number_of_potential_node_mappings, number_of_matching_in_neighbor_mappings), -1, dtype=np.int32)
+            self.minimum_selection_push = np.full((self.number_of_potential_node_mappings, number_of_matching_out_neighbor_mappings), -1, dtype=np.int32)
 
             partial_fixed_mapping = {reqnode: None for reqnode in self.contained_request_nodes}
 
             for local_node_mapping_index, node_mapping in enumerate(itertools.product(*self.list_of_ordered_allowed_nodes)):
-                if not self.validity_array[local_node_mapping_index]:
-                    self.minimum_selection_pull[local_node_mapping_index] = None
-                    continue
                 for node_mapping_index, reqnode in enumerate(self.contained_request_nodes):
                     partial_fixed_mapping[reqnode] = node_mapping[node_mapping_index]
 
-                in_neighbor.get_indices_of_mappings_under_restrictions_inplace(partial_fixed_mapping,
-                                                                               self.minimum_selection_pull[
-                                                                                   local_node_mapping_index])
+                # in_neighbor.fill_matrix_with_mapping_indices(partial_fixed_mapping,
+                #                                              self.minimum_selection_pull,
+                #                                              result_array_row=local_node_mapping_index)
+                #
+                # out_neighbor.fill_matrix_with_mapping_indices(partial_fixed_mapping,
+                #                                               self.minimum_selection_push,
+                #                                               result_array_row=local_node_mapping_index)
 
-                out_neighbor.get_indices_of_mappings_under_restrictions_inplace(partial_fixed_mapping,
-                                                                                self.minimum_selection_push[
-                                                                                    local_node_mapping_index])
+                list_of_indices = in_neighbor.get_indices_of_mappings_under_restrictions(partial_fixed_mapping)
+                self.minimum_selection_pull[local_node_mapping_index, :] = list_of_indices
 
-                if len(self.minimum_selection_pull[local_node_mapping_index]) == 0 or len(self.minimum_selection_push[local_node_mapping_index]) == 0:
-                    self.minimum_selection_pull[local_node_mapping_index] = None
+                list_of_indices = out_neighbor.get_indices_of_mappings_under_restrictions(partial_fixed_mapping)
+                self.minimum_selection_push[local_node_mapping_index,:] = list_of_indices
 
     def _apply_local_costs_updates(self):
         if self.nodetype == NodeType.Forget:
@@ -907,11 +1047,11 @@ class OptimizedDynVMPNode(object):
         in_neighbor = self.in_neighbors[0]
         out_neighbor = self.out_neighbor
 
+        self.mapping_costs = np.nanmin(in_neighbor.mapping_costs[self.minimum_selection_pull], axis=1)
+        #out_neighbor.mapping_costs[self.minimum_selection_push] += self.mapping_costs
         for local_node_mapping_index in xrange(int(self.number_of_potential_node_mappings)):
-            minimum_selection_indices_for_in_neighbor = self.minimum_selection_pull[local_node_mapping_index]
-            if minimum_selection_indices_for_in_neighbor != None:
-                self.mapping_costs[local_node_mapping_index] = np.nanmin(in_neighbor.mapping_costs[minimum_selection_indices_for_in_neighbor])
-                out_neighbor.mapping_costs[self.minimum_selection_push[local_node_mapping_index]] += self.mapping_costs[local_node_mapping_index]
+        #     self.mapping_costs[local_node_mapping_index] = np.nanmin(in_neighbor.mapping_costs[self.minimum_selection_pull[local_node_mapping_index,:]])
+             out_neighbor.mapping_costs[self.minimum_selection_push[local_node_mapping_index,:]] += self.mapping_costs[local_node_mapping_index]
 
     def compute_costs_based_on_children(self):
         if self.nodetype == NodeType.Leaf:
@@ -1040,28 +1180,35 @@ class OptimizedDynVMP(object):
     def _recover_node_mapping(self):
         fixed_node_mappings = {}
         root_cost = None
+
+
         for treenode in self.ssntda.pre_order_traversal:
 
             # find mapping of least cost
             dynvmp_treenode = self.dynvmp_tree_nodes[treenode]
-
-            potential_node_mapping_indices = dynvmp_treenode.get_indices_of_mappings_under_restrictions(
-                fixed_node_mappings)
-            corresponding_node_mapping = None
-
+            best_mapping_index = None
             try:
-                best_mapping_index = np.nanargmin(dynvmp_treenode.mapping_costs[potential_node_mapping_indices])
+                if not fixed_node_mappings:
+                    best_mapping_index = np.nanargmin(dynvmp_treenode.mapping_costs)
+                    root_cost = dynvmp_treenode.mapping_costs[best_mapping_index]
+                else:
+                    number_of_matching_mappings = dynvmp_treenode.number_of_potential_node_mappings
+                    for reqnode in dynvmp_treenode.contained_request_nodes:
+                        if reqnode in fixed_node_mappings:
+                            number_of_matching_mappings /= dynvmp_treenode.number_of_allowed_nodes[reqnode]
 
-                if dynvmp_treenode.nodetype == NodeType.Root:
-                    root_cost = dynvmp_treenode.mapping_costs[potential_node_mapping_indices[best_mapping_index]]
-                    if root_cost >= self._mapping_cost_bound:
-                        # this should never happen
-                        return None, None
-                corresponding_node_mapping = dynvmp_treenode.get_node_mapping_based_on_index(
-                    potential_node_mapping_indices[best_mapping_index])
+                    list_of_indices = dynvmp_treenode.get_indices_of_mappings_under_restrictions(fixed_node_mappings)
+
+
+
+                    best_mapping_index_relative_to_slice = np.nanargmin(dynvmp_treenode.mapping_costs[list_of_indices])
+                    best_mapping_index = dynvmp_treenode.list_for_indices[best_mapping_index_relative_to_slice]
+
             except ValueError:
                 # no mapping could be found
                 return None, None
+
+            corresponding_node_mapping = dynvmp_treenode.get_node_mapping_based_on_index(best_mapping_index)
 
             for request_node, substrate_node in corresponding_node_mapping.iteritems():
                 if request_node in fixed_node_mappings:
