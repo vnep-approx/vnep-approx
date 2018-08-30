@@ -323,7 +323,7 @@ def test_opt_dynvmp_and_classic_mcf_agree_for_unambiguous_scenario(
           "               This is a speed-up of:  {:02.2f} times\n"
           "               Total time in Dyn-VMP:  {:02.4f} s\n"
           "                Total time in Gurobi:  {:02.4f} s\n"
-          "         Speedup Dyn-VMP over Gurobi:  {:02.2f} times\n".format(len(req.nodes),
+          "         Speedup Dyn-VMP over Gurobi:  {:02.2f} times (>1 is good)\n".format(len(req.nodes),
                                                                            len(req.edges),
                                                                            sntd.width,
                                                                            initial_computation_time,
@@ -331,4 +331,4 @@ def test_opt_dynvmp_and_classic_mcf_agree_for_unambiguous_scenario(
                                                                            initial_computation_time / average_of_others,
                                                                            sum(times_dynvmp),
                                                                            sum(times_gurobi),
-                                                                           sum(times_dynvmp)/sum(times_gurobi)))
+                                                                           sum(times_gurobi)/sum(times_dynvmp)))
