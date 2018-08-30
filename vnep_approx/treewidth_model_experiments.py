@@ -108,13 +108,13 @@ def execute_single_experiment(process_index, num_processes, parameter_space, ran
         if param_index % num_processes == process_index:
             num_nodes, prob, repetition_index = params
             logger.info("Processing graph {} with {} nodes and {} prob, rep {}".format(param_index, num_nodes, prob, repetition_index))
-            gen_time_start = time.clock()
+            gen_time_start = time.time()
             graph = graph_generator.generate_graph(num_nodes, prob)
-            gen_time = time.clock() - gen_time_start
+            gen_time = time.time() - gen_time_start
 
-            algorithm_time_start = time.clock()
+            algorithm_time_start = time.time()
             tree_decomp = twm.compute_tree_decomposition(graph)
-            algorithm_time = time.clock() - algorithm_time_start
+            algorithm_time = time.time() - algorithm_time_start
             assert tree_decomp.is_tree_decomposition(graph)
 
             result = TreeDecompositionAlgorithmResult(
