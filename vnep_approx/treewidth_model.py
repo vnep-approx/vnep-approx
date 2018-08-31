@@ -1145,8 +1145,40 @@ class OptimizedDynVMP(object):
         for t in self.ssntda.post_order_traversal:
             self.dynvmp_tree_nodes[t].compute_costs_based_on_children()
 
-    def recover_mapping(self):
-        root_cost, reqnode_mappings = self._recover_node_mapping()
+    def get_optimal_solution_cost(self):
+        minimal_cost = None
+        dynvmp_root_node = self.dynvmp_tree_nodes[self.ssntda.root]
+        try:
+            minimal_cost = np.nanmin(dynvmp_root_node.mapping_costs)
+        except:
+            #if there was no non-nan value..
+            pass
+        if np.isnan(minimal_cost):
+            minimal_cost = None
+
+        return minimal_cost
+
+    def get_ordered_root_solution_costs_and_mapping_indices(self, maximum_number_of_solutions_to_return=None):
+        dynvmp_root_node = self.dynvmp_tree_nodes[self.ssntda.root]
+        non_nan_indices = np.where(~np.isnan(dynvmp_root_node.mapping_costs))[0]
+        if np.shape(non_nan_indices)[0] > 0:
+            if maximum_number_of_solutions_to_return is None:
+                maximum_number_of_solutions_to_return = np.shape(non_nan_indices)[0]
+            non_nan_slice = dynvmp_root_node.mapping_costs[non_nan_indices]
+            order_of_indices = np.argsort(non_nan_slice)
+
+            aranged_costs = non_nan_slice[order_of_indices]
+            aranged_original_indices = non_nan_indices[order_of_indices]
+
+            if maximum_number_of_solutions_to_return is None or np.shape(non_nan_indices)[0] < maximum_number_of_solutions_to_return:
+                maximum_number_of_solutions_to_return = np.shape(non_nan_indices)[0]
+
+            return (aranged_costs[:maximum_number_of_solutions_to_return], aranged_original_indices[:maximum_number_of_solutions_to_return])
+        else:
+            return (None, None)
+
+    def recover_mapping(self, root_mapping_index=None):
+        root_cost, reqnode_mappings = self._recover_node_mapping(root_mapping_index=root_mapping_index)
         if root_cost is None:
             return None, None
 
@@ -1166,6 +1198,13 @@ class OptimizedDynVMP(object):
 
         return root_cost, result_mapping
 
+    def recover_list_of_mappings(self, list_of_root_mapping_indices):
+        result = []
+        for mapping_index in list_of_root_mapping_indices:
+            result.append(self.recover_mapping(root_mapping_index=mapping_index)[1])
+        return result
+
+
     def _reconstruct_edge_mapping(self, reqedge, source_mapping, target_mapping):
         reqedge_predecessors = self.svpc.valid_sedge_pred[reqedge][source_mapping]
         u = target_mapping
@@ -1177,10 +1216,9 @@ class OptimizedDynVMP(object):
         path = list(reversed(path))
         return path
 
-    def _recover_node_mapping(self):
+    def _recover_node_mapping(self, root_mapping_index = None):
         fixed_node_mappings = {}
         root_cost = None
-
 
         for treenode in self.ssntda.pre_order_traversal:
 
@@ -1189,8 +1227,13 @@ class OptimizedDynVMP(object):
             best_mapping_index = None
             try:
                 if not fixed_node_mappings:
-                    best_mapping_index = np.nanargmin(dynvmp_treenode.mapping_costs)
-                    root_cost = dynvmp_treenode.mapping_costs[best_mapping_index]
+                    if root_mapping_index is None:
+                        best_mapping_index = np.nanargmin(dynvmp_treenode.mapping_costs)
+                        root_cost = dynvmp_treenode.mapping_costs[best_mapping_index]
+                    else:
+                        best_mapping_index = root_mapping_index
+                        root_cost = dynvmp_treenode.mapping_costs[best_mapping_index]
+
                 else:
                     number_of_matching_mappings = dynvmp_treenode.number_of_potential_node_mappings
                     for reqnode in dynvmp_treenode.contained_request_nodes:

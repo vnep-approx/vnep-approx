@@ -210,6 +210,17 @@ def test_opt_dynvmp(request_id):
                                                  sntd)
     opt_dynvmp.initialize_data_structures()
     opt_dynvmp.compute_solution()
+
+    obj = opt_dynvmp.get_optimal_solution_cost()
+    if obj is not None:
+        costs, mapping_indices = opt_dynvmp.get_ordered_root_solution_costs_and_mapping_indices(maximum_number_of_solutions_to_return=100)
+        for index, cost in np.ndenumerate(costs):
+            if index == 0:
+                assert cost == obj
+            print "{}-th best cost is: {} and index is {}".format(index, cost, mapping_indices[index])
+        corresponding_mappings = opt_dynvmp.recover_list_of_mappings(mapping_indices)
+        print "Number of obtained mappings: {}, mappings: {}".format(len(corresponding_mappings), corresponding_mappings)
+
     result_mapping = opt_dynvmp.recover_mapping()
     print "Returned mapping! Namely, the following: {}".format(result_mapping)
 
