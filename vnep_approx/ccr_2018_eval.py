@@ -63,15 +63,60 @@ CCREvaluationInstance = namedtuple("CCREvaluationInstance", ["scenario",
 
 INFINITY = float("inf")
 
-class SeparationLP_DynVMP(object):
 
+class SeparationLPSolution(modelcreator.AlgorithmResult):
+    def __init__(self,
+                 time_preprocessing,
+                 time_optimization,
+                 time_postprocessing,
+                 tree_decomp_runtimes,
+                 dynvmp_init_runtimes,
+                 dynvmp_computation_runtimes,
+                 gurobi_runtimes,
+                 status,
+                 profit,
+                 ):
+        super(SeparationLPSolution, self).__init__()
+        self.time_preprocessing = time_preprocessing
+        self.time_optimization = time_optimization
+        self.time_postprocessing = time_postprocessing
+        self.tree_decomp_runtimes = tree_decomp_runtimes
+        self.dynvmp_init_runtimes = dynvmp_init_runtimes
+        self.dynvmp_computation_runtimes = dynvmp_computation_runtimes
+        self.gurobi_runtimes = gurobi_runtimes
+        self.status = status
+        self.profit = profit
+
+    def get_solution(self):
+        return self
+
+    def cleanup_references(self, original_scenario):
+        pass
+
+    def __str__(self):
+        output_string = ""
+
+        output_string += "         time_preprocessing: {}\n".format(self.time_preprocessing)
+        output_string += "          time_optimization: {}\n".format(self.time_optimization)
+        output_string += "        time_postprocessing: {}\n".format(self.time_postprocessing)
+        output_string += "       tree_decomp_runtimes: {}\n".format(self.tree_decomp_runtimes)
+        output_string += "       dynvmp_init_runtimes: {}\n".format(self.dynvmp_init_runtimes)
+        output_string += "dynvmp_computation_runtimes: {}\n".format(self.dynvmp_computation_runtimes)
+        output_string += "            gurobi_runtimes: {}\n".format(self.gurobi_runtimes)
+        output_string += "                     status: {}\n".format(self.status)
+        output_string += "                     profit: {}\n".format(self.profit)
+
+        return output_string
+
+
+class SeparationLP_DynVMP(object):
+    ALGORITHM_ID = "SeparationLPDynVMP"
 
     def __init__(self,
-                 ccr_eval_instance,
+                 scenario,
                  gurobi_settings=None,
                  logger=None):
-        self.ccr_eval_instance = ccr_eval_instance
-        self.scenario = self.ccr_eval_instance.scenario
+        self.scenario = scenario
         self.substrate = self.scenario.substrate
         self.requests = self.scenario.requests
         self.objective = self.scenario.objective
@@ -268,7 +313,7 @@ class SeparationLP_DynVMP(object):
             dynvmp_instance.compute_solution()
             self.dynvmp_runtimes_computation[req].append(time.time() - single_dynvmp_runtime)
             opt_cost = dynvmp_instance.get_optimal_solution_cost()
-            if opt_cost is not None and opt_cost < 0.999*(req.profit - self.dual_costs_requests[req]):
+            if opt_cost is not None and opt_cost < 0.995*(req.profit - self.dual_costs_requests[req]):
                 self.introduce_new_columns(req, maximum_number_of_columns_to_introduce=5, cutoff = req.profit-self.dual_costs_requests[req])
                 new_columns_generated = True
 
@@ -290,6 +335,11 @@ class SeparationLP_DynVMP(object):
             dynvmp_instance.reinitialize(new_node_costs=self.dual_costs_node_resources,
                                          new_edge_costs=self.dual_costs_edge_resources)
             self.dynvmp_runtimes_initialization[req].append(time.time() - single_dynvmp_reinit_time)
+
+    def compute_integral_solution(self):
+        #the name sucks, but we sadly need it for the framework
+        return self.compute_solution()
+
 
     def compute_solution(self):
         ''' Abstract function computing an integral solution to the model (generated before).
@@ -319,11 +369,12 @@ class SeparationLP_DynVMP(object):
 
         new_columns_generated = True
         counter = 0
+        last_obj = -1
+        current_obj = 0
         while new_columns_generated:
             gurobi_runtime = time.time()
             self.model.optimize()
             self.gurobi_runtimes.append(time.time() - gurobi_runtime)
-            self.model.write("temp_{}.lp".format(counter))
             self.update_dual_costs_and_reinit_dynvmps()
 
             new_columns_generated = self.perform_separation_and_introduce_new_columns()
@@ -349,17 +400,25 @@ class SeparationLP_DynVMP(object):
                                                 objBound=objBound,
                                                 integralSolution=False)
 
-        result = None
-        if self.status.isFeasible():
-            self.solution = self.recover_solution_from_variables()
+        anonymous_decomp_runtimes = []
+        anonymous_init_runtimes = []
+        anonymous_computation_runtimes = []
+        for req in (self.requests):
+            anonymous_decomp_runtimes.append(self.tree_decomp_computation_times[req])
+            anonymous_init_runtimes.append(self.dynvmp_runtimes_initialization[req])
+            anonymous_computation_runtimes.append(self.dynvmp_runtimes_computation[req])
 
-        self.time_postprocessing = time.clock() - self._time_postprocess_start
+        self.result = SeparationLPSolution(self.time_preprocess,
+                                           self.time_optimization,
+                                           0,
+                                           anonymous_decomp_runtimes,
+                                           anonymous_init_runtimes,
+                                           anonymous_computation_runtimes,
+                                           self.gurobi_runtimes,
+                                           self.status,
+                                           objVal)
 
-        self.logger.debug("Preprocessing time:   {}".format(self.time_preprocess))
-        self.logger.debug("Optimization time:    {}".format(self.time_optimization))
-        self.logger.debug("Postprocessing time:  {}".format(self.time_postprocessing))
-
-        return result
+        return self.result
 
     def recover_solution_from_variables(self):
         pass

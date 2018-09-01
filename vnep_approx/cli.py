@@ -29,7 +29,7 @@ import treewidth_model_experiments
 
 import alib.cli
 from alib import run_experiment, util
-from . import modelcreator_ecg_decomposition, randomized_rounding_triumvirate, treewidth_model
+from . import modelcreator_ecg_decomposition, randomized_rounding_triumvirate, treewidth_model, ccr_2018_eval
 
 
 @click.group()
@@ -81,6 +81,11 @@ def start_experiment(experiment_yaml,
     run_experiment.register_algorithm(
         modelcreator_ecg_decomposition.ModelCreatorCactusDecomposition.ALGORITHM_ID,
         modelcreator_ecg_decomposition.ModelCreatorCactusDecomposition
+    )
+
+    run_experiment.register_algorithm(
+        ccr_2018_eval.SeparationLP_DynVMP.ALGORITHM_ID,
+        ccr_2018_eval.SeparationLP_DynVMP
     )
 
     run_experiment.register_algorithm(
