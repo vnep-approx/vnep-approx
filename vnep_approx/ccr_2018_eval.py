@@ -371,15 +371,16 @@ class SeparationLP_DynVMP(object):
         counter = 0
         last_obj = -1
         current_obj = 0
-        while new_columns_generated and (current_obj-last_obj) > 0.000001:
+        while new_columns_generated and abs(current_obj-last_obj) > 0.000001:
             gurobi_runtime = time.time()
             self.model.optimize()
+            last_obj = current_obj
+            current_obj = self.model.getAttr("ObjVal")
             self.gurobi_runtimes.append(time.time() - gurobi_runtime)
             self.update_dual_costs_and_reinit_dynvmps()
 
             new_columns_generated = self.perform_separation_and_introduce_new_columns()
-            last_obj = current_obj
-            current_obj = self.model.getAttr("ObjVal")
+
             counter += 1
 
         self.time_optimization = time.time() - time_optimization_start
