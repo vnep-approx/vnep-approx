@@ -77,7 +77,7 @@ def test_tw_formulation_precomputed_scenario(request_id):
     sub = create_test_substrate()
     scenario = datamodel.Scenario(name="test_scen", substrate=sub, requests=[req])
 
-    tw_mc = treewidth_model.TreewidthModelCreator(scenario)
+    tw_mc = treewidth_model._TreewidthModelCreator(scenario)
     tw_mc.init_model_creator()
 
 

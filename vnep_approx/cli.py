@@ -22,14 +22,13 @@
 #
 
 import os
-import sys
 
 import click
-import treewidth_model_experiments
+from vnep_approx.to_delete import treewidth_model_experiments, ccr_2018_eval
 
 import alib.cli
 from alib import run_experiment, util
-from . import modelcreator_ecg_decomposition, randomized_rounding_triumvirate, treewidth_model, ccr_2018_eval
+from . import modelcreator_ecg_decomposition, randomized_rounding_triumvirate
 
 
 @click.group()

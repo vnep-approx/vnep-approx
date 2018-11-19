@@ -1,18 +1,44 @@
+# MIT License
+#
+# Copyright (c) 2016-2018 Matthias Rost, Elias Doehne
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
+
 import itertools
 import os
 import subprocess
 from collections import deque
 import numpy as np
+import time
 from heapq import heappush, heappop
 
-
+import gurobipy
 from gurobipy import GRB, LinExpr
-from alib import datamodel, modelcreator, solutions
+from alib import datamodel, modelcreator, solutions, util
 
-""" Some datastructures to represent tree decompositions """
+""" This module contains data structures and algorithms related to treewidth based approximation approaches """
 
 
 class UndirectedGraph(object):
+    """ Simple representation of an unidrected graph (necessitated for tree decompositions).
+    """
     def __init__(self, name):
         self.name = name
         self.nodes = set()
@@ -84,6 +110,8 @@ class UndirectedGraph(object):
 
 
 class TreeDecomposition(UndirectedGraph):
+    ''' Representation of a tree decomposition.'''
+
     def __init__(self, name):
         super(TreeDecomposition, self).__init__(name)
 
@@ -112,16 +140,6 @@ class TreeDecomposition(UndirectedGraph):
                 self.complete_request_node_to_tree_node_map[req_node] = [node]
             else:
                 self.complete_request_node_to_tree_node_map[req_node].append(node)
-
-        #     if req_node not in self.complete_request_node_to_tree_node_map:
-        #         self.complete_request_node_to_tree_node_map[req_node] = []
-        #     else:
-        #         for other_tree_node in self.complete_request_node_to_tree_node_map[req_node]:
-        #             edges_to_create.add(frozenset([other_tree_node,node]))
-        #         self.complete_request_node_to_tree_node_mao[req_node].append(node)
-        # for edge_to_create in edges_to_create:
-        #     edge_as_list = list(edge_to_create)
-        #     super(TreeDecomposition,self).add_edge(edge_as_list[0], edge_as_list[1])
 
 
     def remove_node(self, node):
@@ -242,6 +260,9 @@ class TreeDecomposition(UndirectedGraph):
 
 
 class TDArborescence(datamodel.Graph):
+
+    ''' Representation of a directed and rooted tree decomposition, i.e. an arborescence.'''
+
     def __init__(self, name, root):
         super(TDArborescence, self).__init__(name)
         self.root = root
@@ -274,7 +295,7 @@ class TDArborescence(datamodel.Graph):
         assert visited == self.nodes  # sanity check
 
 class NodeType(object):
-
+    ''' Used within the DynVMP algorithm to classify nodes.'''
     Leaf = 0
     Introduction = 1
     Forget = 2
@@ -282,6 +303,21 @@ class NodeType(object):
     Root = 4
 
 class SmallSemiNiceTDArb(TreeDecomposition):
+
+    ''' A specific Tree Decomposition Arborescence (TDArb):
+        - small means that no node bag is a subset of any other node bag (see function _make_small)
+        - semi-niceness is a term we have come up with, to denote the following relaxation of niceness (of a tree decomposition)
+          A nice tree decomposition is one in which the following holds:
+          . the tree is binary
+          . bags of leaves only contain a single node
+          . each node has one of the following 3 types:
+            _ introduce: a new element is contained in the bag,
+            _ forget: a previous element is removed,
+            _ join: the node has exactly 2 children having the same node bag as the current node.
+          For us, a semi-nice tree decomposition is simply a small tree decomposition (hence no node is a subset of any other node)
+          in which for each edge one additional node is introduced representing the intersection of the respective node bags.
+          Hence, "u - w" becomes "u - v - w" with v corresponding to the intersection of the node bags of u and w.
+    '''
 
     def __init__(self, original_td, request):
         super(SmallSemiNiceTDArb, self).__init__("small_nice({})".format(original_td.name))
@@ -367,14 +403,6 @@ class SmallSemiNiceTDArb(TreeDecomposition):
                 raise ValueError("Tree decomposition was not nice in the first place!")
 
             internode = "bag_intersection_{}_{}".format(tail, head)
-            # print("Splitting edge {} with repsective "
-            #       "node bags {} and {} to introduce "
-            #       "new node {} with bag {}".format(edge,
-            #                                        tail_bag,
-            #                                        head_bag,
-            #                                        internode,
-            #                                        intersection))
-
 
             self.add_node(internode, intersection)
 
@@ -445,6 +473,8 @@ class SmallSemiNiceTDArb(TreeDecomposition):
 
 
 class ValidMappingRestrictionComputer(object):
+
+    ''' This class facilitates the computation of valid edge sets for the respective request edges. '''
 
     def __init__(self, substrate, request):
         self.substrate = substrate
@@ -530,6 +560,9 @@ class ValidMappingRestrictionComputer(object):
 
 
 class ShortestValidPathsComputer(object):
+
+    ''' This class is optimized to compute all shortest paths in the substrate quickly for varying valid edge sets.
+    '''
 
     def __init__(self, substrate, request, valid_mapping_restriction_computer, edge_costs):
         self.substrate = substrate
@@ -628,6 +661,10 @@ class ShortestValidPathsComputer(object):
 
 class OptimizedDynVMPNode(object):
 
+    ''' Represents a node in our Dyn-VNP algorithm. The prefix Optimized here stands for the fact that our
+        implementation is significantly more complex (hence optimized) than that presented in the paper.
+    '''
+
     def __init__(self, optdynvmp_parent, treenode):
         self.optdynvmp_parent = optdynvmp_parent
         self.substrate = optdynvmp_parent.substrate
@@ -648,21 +685,6 @@ class OptimizedDynVMPNode(object):
         return self.non_recursive_index_generation(meta_information,
                                                    construction_rule)
 
-
-        #just for debugging; remove this later on!
-        # other_result_list = []
-        # print("\n\n\n === NEW ===")
-        # self.fill_matrix_with_mapping_indices(meta_information, construction_rule, other_result_list)
-        #
-        # print other_result_list
-        # print result_list
-        #
-        # if len(other_result_list) != len(result_list):
-        #     raise ValueError("{}\n{}\n{}\n{}".format(other_result_list, result_list, construction_rule, meta_information))
-        # for i in range(len(other_result_list)):
-        #     if other_result_list[i] != result_list[i]:
-        #         raise ValueError(
-        #             "{}\n{}\n{}\n{}".format(other_result_list, result_list, construction_rule, meta_information))
 
 
 
@@ -748,7 +770,6 @@ class OptimizedDynVMPNode(object):
                                                 current_reqnode_index+1
                                                 )
             else:
-                #if self.validity_array[current_value]: #TODO somehow does not work when only including valid mapping indices
                 result_list.append(current_value)
 
     def fill_matrix_with_mapping_indices(self,
@@ -813,17 +834,6 @@ class OptimizedDynVMPNode(object):
             raise ValueError("Given index {} is out of bounds [0,...,{}].".format(mapping_index,
                                                                                   self.number_of_potential_node_mappings))
 
-        # debug = False
-        # 
-        # if debug:
-        #     o_result = {}
-        #     for o_mapping_index, mapping in enumerate(itertools.product(*self.list_of_ordered_allowed_nodes)):
-        #         if o_mapping_index != mapping_index:
-        #             continue
-        #         for reqnode_index, reqnode in enumerate(self.contained_request_nodes):
-        #             o_result[reqnode] = mapping[reqnode_index]
-        #         break
-
 
         result_node_mapping = {}
         for reversed_reqnode_index in range(self.number_of_request_nodes):
@@ -834,14 +844,7 @@ class OptimizedDynVMPNode(object):
             result_node_mapping[request_node] = snode
             mapping_index /= number_of_allowed_nodes_for_request_node
 
-        # if debug:
-        #     print "Naively found vs. intelligently found:\n\t{}\n\t{}".format(result_node_mapping, o_result)
-        # 
-        #     if set(result_node_mapping.keys()) != set(o_result.keys()):
-        #         raise ValueError("THis is bad!")
-        #     for reqnode in result_node_mapping.keys():
-        #         if result_node_mapping[reqnode] != o_result[reqnode]:
-        #             raise ValueError("Really bad!")
+
 
         return result_node_mapping
 
@@ -1070,6 +1073,10 @@ class OptimizedDynVMPNode(object):
 
 class OptimizedDynVMP(object):
 
+    ''' The actual algorithm to compute optimal valid mappings using dynamic programming. Nearly all algorithmic challenging
+        tasks are to be found in the implementation of the OptimizedDynVMPNode class.
+    '''
+
     def __init__(self, substrate, request, ssntda, initial_snode_costs = None, initial_sedge_costs = None):
         self.substrate = substrate
         self.request = request
@@ -1275,174 +1282,6 @@ class OptimizedDynVMP(object):
         for t in self.ssntda.post_order_traversal:
             self.dynvmp_tree_nodes[t].reinitialize()
 
-#
-#   OLD
-#
-
-
-
-
-
-class NiceTDConversion(object): # TODO: Work in Progress
-    LEAF = "L"
-    JOIN = "J"
-    INTRO = "I"
-    FORGET = "F"
-
-    def __init__(self, request, initial_td=None):
-        if initial_td is None:
-            initial_td = compute_tree_decomposition(request)
-        self.initial_td = initial_td
-        self.request = request
-        self.nice_td = None
-
-    def initialize(self, root=None):
-        self.initial_arb = self.initial_td.convert_to_arborescence(root=root)
-        self.nice_td = TreeDecomposition("{}_nice".format(self.initial_td.name))
-        self.next_id = {
-            self.LEAF: 1,
-            self.JOIN: 1,
-            self.FORGET: 1,
-            self.INTRO: 1,
-        }
-        self.parent_dict = {}
-
-    def make_nice_tree_decomposition(self):
-        q = [self.initial_arb.root]
-        while q:
-            t = q.pop()
-            t_bag = self.initial_td.node_bag_dict[t]
-            self.nice_td.add_node(t, t_bag)
-            if t in self.parent_dict:
-                self.nice_td.add_edge(self.parent_dict[t], t)
-            children = self.initial_arb.get_out_neighbors(t)
-
-            num_children = len(children)
-            if num_children == 0:
-                t_bag = sorted(t_bag)
-                self._make_forget_chain(t, frozenset([t_bag[-1]]), self.LEAF)
-                continue
-
-            if num_children == 1:
-                connection_nodes = [t]  # connect directly to t
-            else:
-                # build binary tree of join nodes
-                connection_nodes = self._make_join_node_tree(t)
-            for parent, child in zip(connection_nodes, self.initial_arb.get_out_neighbors(t)):
-                child_bag = self.initial_td.node_bag_dict[child]
-                new_parent = self._make_forget_chain(parent, child_bag, self.FORGET)
-                new_parent = self._make_intro_chain(new_parent, child_bag, self.INTRO)
-                q.append(child)
-                self.parent_dict[child] = new_parent
-        return self.nice_td
-
-    def _make_join_node_tree(self, t):
-        num_children = len(self.initial_arb.get_out_neighbors(t))
-        t_bag = self.nice_td.node_bag_dict[t]
-        connection_nodes = deque([t])  # contains the leaves of the binary tree.
-        while len(connection_nodes) < num_children:
-            parent = connection_nodes.popleft()
-            leftchild = self._next_node_id(self.JOIN)
-            rightchild = self._next_node_id(self.JOIN)
-            self.nice_td.add_node(leftchild, t_bag)
-            self.nice_td.add_node(rightchild, t_bag)
-            self.nice_td.add_edge(parent, leftchild)
-            self.nice_td.add_edge(parent, rightchild)
-            connection_nodes.append(leftchild)
-            connection_nodes.append(rightchild)
-        connection_nodes = list(connection_nodes)
-        return connection_nodes
-
-    def _make_forget_chain(self, start, target_bag, target_node_type):
-        start_bag = self.nice_td.node_bag_dict[start]
-        nodes_to_forget = sorted(start_bag - target_bag)
-        parent = start
-        new_node = None
-        current_bag = set(start_bag)
-        while nodes_to_forget:
-            forget_node = nodes_to_forget.pop()
-            current_bag.remove(forget_node)
-            if len(current_bag) > 1:
-                new_node = self._next_node_id(self.FORGET)
-            else:
-                new_node = self._next_node_id(target_node_type)
-            self.nice_td.add_node(new_node, frozenset(current_bag))
-            self.nice_td.add_edge(parent, new_node)
-            parent = new_node
-        return new_node
-
-    def _make_intro_chain(self, start, target_bag, target_node_type):
-        start_bag = self.nice_td.node_bag_dict[start]
-        nodes_to_introduce = sorted(target_bag - start_bag)
-        parent = start
-        new_node = None
-        current_bag = set(start_bag)
-        while nodes_to_introduce:
-            next_intro_node = nodes_to_introduce.pop()
-            current_bag.add(next_intro_node)
-            if len(current_bag) > 1:
-                new_node = self._next_node_id(self.INTRO)
-            else:
-                new_node = self._next_node_id(target_node_type)
-            self.nice_td.add_node(new_node, frozenset(current_bag))
-            self.nice_td.add_edge(parent, new_node)
-            parent = new_node
-        return new_node
-
-    def _next_node_id(self, node_type):
-        result = "{}_{}".format(node_type, self.next_id[node_type])
-        self.next_id[node_type] += 1
-        return result
-
-
-def is_nice_tree_decomposition(tree_decomp, arborescence):
-    for t in tree_decomp.nodes:
-        children = arborescence.get_out_neighbors(t)
-        if len(children) == 0:
-            # leaf node: May only contain one bag node
-            if not _is_valid_leaf_node(tree_decomp, t):
-                print "Node {} is not a valid leaf node".format(t)
-                return False
-        elif len(children) == 1:
-            # introduce or forget node
-            if not _is_valid_intro_or_forget_node(tree_decomp, t, next(iter(children))):
-                print "Node {} is not a valid introduction or forget node".format(t)
-                return False
-        elif len(children) == 2:
-            # join node: all children must have same bag set
-            children = arborescence.get_out_neighbors(t)
-            if not _is_valid_join_node(tree_decomp, t, children):
-                print "Node {} is not a valid join node".format(t)
-                return False
-        else:
-            print "Node {} has too many neighbors".format(t)
-            return False
-    return True
-
-
-def _is_valid_leaf_node(tree_decomp, t):
-    return len(tree_decomp.node_bag_dict[t]) == 1
-
-
-def _is_valid_intro_or_forget_node(tree_decomp, t, child):
-    bag_neighbor = tree_decomp.node_bag_dict[child]
-    bag_t = tree_decomp.node_bag_dict[t]
-    num_forgotten = len(bag_neighbor - bag_t)
-    num_introduced = len(bag_t - bag_neighbor)
-    is_forget_node = num_introduced == 0 and num_forgotten == 1
-    is_intro_node = num_introduced == 1 and num_forgotten == 0
-    return is_intro_node or is_forget_node
-
-
-def _is_valid_join_node(tree_decomp, t, children):
-    if len(children) != 2:
-        return False
-    node_bag = tree_decomp.node_bag_dict[t]
-    c1 = children[0]
-    c2 = children[1]
-    return (node_bag == tree_decomp.node_bag_dict[c1] and
-            node_bag == tree_decomp.node_bag_dict[c2])
-
 
 """ Computing tree decompositions """
 
@@ -1450,7 +1289,7 @@ def _is_valid_join_node(tree_decomp, t, children):
 class TreeDecompositionComputation(object):
     """
     Use the exact tree decomposition algorithm implementation by Hisao Tamaki and Hiromu Ohtsuka, obtained
-    from https://github.com/TCS-Meiji/PACE2017-TrackA, to compute tree deecompositions.
+    from https://github.com/TCS-Meiji/PACE2017-TrackA, to compute tree decompositions.
 
     It assumes that the path to the tree decomposition algorithm is stored in the environment variable PACE_TD_ALGORITHM_PATH
     """
@@ -1524,6 +1363,514 @@ class TreeDecompositionComputation(object):
 def compute_tree_decomposition(request):
     return TreeDecompositionComputation(request).compute_tree_decomposition()
 
+### Now comes the Separation LP ###
+
+# Copy pasted...
+Param_MIPGap = "MIPGap"
+Param_IterationLimit = "IterationLimit"
+Param_NodeLimit = "NodeLimit"
+Param_Heuristics = "Heuristics"
+Param_Threads = "Threads"
+Param_TimeLimit = "TimeLimit"
+Param_MIPFocus = "MIPFocus"
+Param_RootCutPasses = "CutPasses"
+Param_Cuts = "Cuts"
+Param_NodefileStart = "NodefileStart"
+Param_NodeMethod = "NodeMethod"
+Param_Method = "Method"
+Param_BarConvTol = "BarConvTol"
+Param_NumericFocus = "NumericFocus"
+
+
+INFINITY = float("inf")
+
+
+class SeparationLPSolution(modelcreator.AlgorithmResult):
+    def __init__(self,
+                 time_preprocessing,
+                 time_optimization,
+                 time_postprocessing,
+                 tree_decomp_runtimes,
+                 dynvmp_init_runtimes,
+                 dynvmp_computation_runtimes,
+                 gurobi_runtimes,
+                 status,
+                 profit,
+                 ):
+        super(SeparationLPSolution, self).__init__()
+        self.time_preprocessing = time_preprocessing
+        self.time_optimization = time_optimization
+        self.time_postprocessing = time_postprocessing
+        self.tree_decomp_runtimes = tree_decomp_runtimes
+        self.dynvmp_init_runtimes = dynvmp_init_runtimes
+        self.dynvmp_computation_runtimes = dynvmp_computation_runtimes
+        self.gurobi_runtimes = gurobi_runtimes
+        self.status = status
+        self.profit = profit
+
+    def get_solution(self):
+        return self
+
+    def cleanup_references(self, original_scenario):
+        pass
+
+    def __str__(self):
+        output_string = ""
+
+        output_string += "         time_preprocessing: {}\n".format(self.time_preprocessing)
+        output_string += "          time_optimization: {}\n".format(self.time_optimization)
+        output_string += "        time_postprocessing: {}\n".format(self.time_postprocessing)
+        output_string += "       tree_decomp_runtimes: {}\n".format(self.tree_decomp_runtimes)
+        output_string += "       dynvmp_init_runtimes: {}\n".format(self.dynvmp_init_runtimes)
+        output_string += "dynvmp_computation_runtimes: {}\n".format(self.dynvmp_computation_runtimes)
+        output_string += "            gurobi_runtimes: {}\n".format(self.gurobi_runtimes)
+        output_string += "                     status: {}\n".format(self.status)
+        output_string += "                     profit: {}\n".format(self.profit)
+
+        return output_string
+
+
+class SeparationLP_OptDynVMP(object):
+    ALGORITHM_ID = "SeparationLPDynVMP"
+
+    '''
+        Allows the computation of LP solutions using OptDynVMP as a separation oracle.
+        Currently, this is only implemented for the Max Profit Objective, but the min cost objective should be easy to
+        handle as well.
+    '''
+
+    def __init__(self,
+                 scenario,
+                 gurobi_settings=None,
+                 logger=None):
+        self.scenario = scenario
+        self.substrate = self.scenario.substrate
+        self.requests = self.scenario.requests
+        self.objective = self.scenario.objective
+
+        if self.objective == datamodel.Objective.MAX_PROFIT:
+            pass
+        elif self.objective == datamodel.Objective.MIN_COST:
+            raise ValueError("The separation LP algorithm can at the moment just handle max-profit instances.")
+        else:
+            raise ValueError("The separation LP algorithm can at the moment just handle max-profit instances.")
+
+        self.gurobi_settings = gurobi_settings
+
+        self.model = None  # the model of gurobi
+        self.status = None  # GurobiStatus instance
+        self.solution = None  # either a integral solution or a fractional one
+
+        self.temporal_log = modelcreator.TemporalLog()
+
+        self.time_preprocess = None
+        self.time_optimization = None
+        self.time_postprocessing = None
+        self._time_postprocess_start = None
+
+        if logger is None:
+            self.logger = util.get_logger(__name__, make_file=False, propagate=True)
+        else:
+            self.logger = logger
+
+    def init_model_creator(self):
+        ''' Initializes the modelcreator by generating the model. Afterwards, model.compute() can be called to let
+            Gurobi solve the model.
+
+        :return:
+        '''
+
+        time_preprocess_start = time.time()
+
+        self.model = gurobipy.Model("column_generation_is_smooth")  #name doesn't matter...
+        self.model._mc = self
+
+        self.model.setParam("LogToConsole", 1)
+
+        if self.gurobi_settings is not None:
+            self.apply_gurobi_settings(self.gurobi_settings)
+
+        self.preprocess_input()
+        self.create_empty_capacity_constraints()
+        self.create_empty_request_embedding_bound_constraints()
+        self.create_empty_objective()
+
+        self.model.update()
+
+        self.time_preprocess = time.time() - time_preprocess_start
+
+    def preprocess_input(self):
+
+        if len(self.substrate.get_types()) > 1:
+            raise ValueError("Can only handle a single node type.")
+
+        self.node_type = list(self.substrate.get_types())[0]
+        self.snodes = self.substrate.nodes
+        self.sedges = self.substrate.edges
+
+        self.node_capacities = {snode : self.substrate.get_node_type_capacity(snode, self.node_type) for snode in self.snodes}
+        self.edge_capacities = {sedge : self.substrate.get_edge_capacity(sedge) for sedge in self.sedges}
+
+        self.dual_costs_requests  = {req : 0 for req in self.requests}
+        self.dual_costs_node_resources = {snode: 1 for snode in self.snodes}
+        self.dual_costs_edge_resources = {sedge: 1 for sedge in self.sedges}
+
+        self.tree_decomp_computation_times = {req : 0 for req in self.requests}
+        self.tree_decomps = {req : None for req in self.requests}
+        for req in self.requests:
+            self.logger.debug("Computing tree decomposition for request {}".format(req))
+            td_computation_time = time.time()
+            td_comp = TreeDecompositionComputation(req)
+            tree_decomp = td_comp.compute_tree_decomposition()
+            sntd = SmallSemiNiceTDArb(tree_decomp, req)
+            self.tree_decomps[req] = sntd
+            self.tree_decomp_computation_times[req] = time.time() - td_computation_time
+            self.logger.debug("\tdone.".format(req))
+
+        self.dynvmp_instances = {req : None for req in self.requests}
+        self.dynvmp_runtimes_initialization = {req: list() for req in self.requests}
+
+        for req in self.requests:
+            self.logger.debug("Initializing DynVMP Instance for request {}".format(req))
+            dynvmp_init_time = time.time()
+            opt_dynvmp = OptimizedDynVMP(self.substrate,
+                                         req,
+                                         self.tree_decomps[req],
+                                         initial_snode_costs=self.dual_costs_node_resources,
+                                         initial_sedge_costs=self.dual_costs_edge_resources)
+            opt_dynvmp.initialize_data_structures()
+            self.dynvmp_runtimes_initialization[req].append(time.time()-dynvmp_init_time)
+            self.dynvmp_instances[req] = opt_dynvmp
+            self.logger.debug("\tdone.".format(req))
+
+        self.mappings_of_requests = {req: list() for req in self.requests}
+        self.dynvmp_runtimes_computation = {req: list() for req in self.requests}
+        self.gurobi_runtimes = []
+
+        self.mapping_variables = {req: list() for req in self.requests}
+
+
+    def create_empty_capacity_constraints(self):
+        self.capacity_constraints = {}
+        for snode in self.snodes:
+            self.capacity_constraints[snode] = self.model.addConstr(0, GRB.LESS_EQUAL, self.node_capacities[snode], name="capacity_node_{}".format(snode))
+        for sedge in self.sedges:
+            self.capacity_constraints[sedge] = self.model.addConstr(0, GRB.LESS_EQUAL, self.edge_capacities[sedge], name="capacity_edge_{}".format(sedge))
+
+    def create_empty_request_embedding_bound_constraints(self):
+        self.embedding_bound = {req : None for req in self.requests}
+        for req in self.requests:
+            self.embedding_bound[req] = self.model.addConstr(0, GRB.LESS_EQUAL, 1)
+
+    def create_empty_objective(self):
+        self.model.setObjective(0, GRB.MAXIMIZE)
+
+
+
+    def introduce_new_columns(self, req, maximum_number_of_columns_to_introduce=None, cutoff=INFINITY):
+        dynvmp_instance = self.dynvmp_instances[req]
+        opt_cost = dynvmp_instance.get_optimal_solution_cost()
+        current_new_allocations = []
+        current_new_variables = []
+        self.logger.debug("Objective when introucding new columns was {}".format(opt_cost))
+        (costs, indices) = dynvmp_instance.get_ordered_root_solution_costs_and_mapping_indices(maximum_number_of_solutions_to_return=maximum_number_of_columns_to_introduce)
+        mapping_list = dynvmp_instance.recover_list_of_mappings(indices)
+        self.logger.debug("Will iterate mapping list {}".format(req.name))
+        for index, mapping in enumerate(mapping_list):
+            if costs[index] > cutoff:
+                break
+            #store mapping
+            varname = "f_req[{}]_k[{}]".format(req.name, index+len(self.mappings_of_requests[req]))
+            new_var = self.model.addVar(lb=0.0,
+                                        ub=1.0,
+                                        obj=req.profit,
+                                        vtype=GRB.CONTINUOUS,
+                                        name=varname)
+            current_new_variables.append(new_var)
+
+            #compute corresponding substrate allocation and store it
+            mapping_allocations = self._compute_allocations(req, mapping)
+            current_new_allocations.append(mapping_allocations)
+
+        #make variables accessible
+        self.model.update()
+        for index, new_var in enumerate(current_new_variables):
+            #handle allocations
+            corresponding_allocation = current_new_allocations[index]
+            for sres, alloc in corresponding_allocation.iteritems():
+                constr = self.capacity_constraints[sres]
+                self.model.chgCoeff(constr, new_var, alloc)
+
+            self.model.chgCoeff(self.embedding_bound[req], new_var, 1.0)
+
+        self.mappings_of_requests[req].extend(mapping_list[:len(current_new_variables)])
+        self.mapping_variables[req].extend(current_new_variables)
+        self.logger.debug("Introduced {} new mappings for {}".format(len(current_new_variables), req.name))
+
+
+    def _compute_allocations(self, req, mapping):
+        allocations = {}
+        for reqnode in req.nodes:
+            snode = mapping.mapping_nodes[reqnode]
+            if snode in allocations:
+                allocations[snode] += req.node[reqnode]['demand']
+            else:
+                allocations[snode] = req.node[reqnode]['demand']
+        for reqedge in req.edges:
+            path = mapping.mapping_edges[reqedge]
+            for sedge in path:
+                stail, shead = sedge
+                if sedge in allocations:
+                    allocations[sedge] += req.edge[reqedge]['demand']
+                else:
+                    allocations[sedge] = req.edge[reqedge]['demand']
+        return allocations
+
+    def perform_separation_and_introduce_new_columns(self):
+        new_columns_generated = False
+
+        for req in self.requests:
+            # execute algorithm
+            dynvmp_instance = self.dynvmp_instances[req]
+            single_dynvmp_runtime = time.time()
+            dynvmp_instance.compute_solution()
+            self.dynvmp_runtimes_computation[req].append(time.time() - single_dynvmp_runtime)
+            opt_cost = dynvmp_instance.get_optimal_solution_cost()
+            if opt_cost is not None and opt_cost < 0.995*(req.profit - self.dual_costs_requests[req]):
+                self.introduce_new_columns(req, maximum_number_of_columns_to_introduce=5, cutoff = req.profit-self.dual_costs_requests[req])
+                new_columns_generated = True
+
+        return new_columns_generated
+
+    def update_dual_costs_and_reinit_dynvmps(self):
+        #update dual costs
+        for snode in self.snodes:
+            self.dual_costs_node_resources[snode] = self.capacity_constraints[snode].Pi
+        for sedge in self.sedges:
+            self.dual_costs_edge_resources[sedge] = self.capacity_constraints[sedge].Pi
+        for req in self.requests:
+            self.dual_costs_requests[req] = self.embedding_bound[req].Pi
+
+        #reinit dynvmps
+        for req in self.requests:
+            dynvmp_instance = self.dynvmp_instances[req]
+            single_dynvmp_reinit_time = time.time()
+            dynvmp_instance.reinitialize(new_node_costs=self.dual_costs_node_resources,
+                                         new_edge_costs=self.dual_costs_edge_resources)
+            self.dynvmp_runtimes_initialization[req].append(time.time() - single_dynvmp_reinit_time)
+
+    def compute_integral_solution(self):
+        #the name sucks, but we sadly need it for the framework
+        return self.compute_solution()
+
+
+    def compute_solution(self):
+        ''' Abstract function computing an integral solution to the model (generated before).
+
+        :return: Result of the optimization consisting of an instance of the GurobiStatus together with a result
+                 detailing the solution computed by Gurobi.
+        '''
+        self.logger.info("Starting computing solution")
+        # do the optimization
+        time_optimization_start = time.time()
+
+        #do the magic here
+
+        for req in self.requests:
+            self.logger.debug("Getting first mappings for request {}".format(req.name))
+            # execute algorithm
+            dynvmp_instance = self.dynvmp_instances[req]
+            single_dynvmp_runtime = time.time()
+            dynvmp_instance.compute_solution()
+            self.dynvmp_runtimes_computation[req].append(time.time() - single_dynvmp_runtime)
+            opt_cost = dynvmp_instance.get_optimal_solution_cost()
+            if opt_cost is not None:
+                self.logger.debug("Introducing new columns for {}".format(req.name))
+                self.introduce_new_columns(req, maximum_number_of_columns_to_introduce=100)
+
+        self.model.update()
+
+        new_columns_generated = True
+        counter = 0
+        last_obj = -1
+        current_obj = 0
+        #the abortion criterion here is not perfect and should probably depend on the relative error instead of the
+        #absolute one.
+        while new_columns_generated and abs(current_obj-last_obj) > 0.0001:
+            gurobi_runtime = time.time()
+            self.model.optimize()
+            last_obj = current_obj
+            current_obj = self.model.getAttr("ObjVal")
+            self.gurobi_runtimes.append(time.time() - gurobi_runtime)
+            self.update_dual_costs_and_reinit_dynvmps()
+
+            new_columns_generated = self.perform_separation_and_introduce_new_columns()
+
+            counter += 1
+
+        self.time_optimization = time.time() - time_optimization_start
+
+        # do the postprocessing
+        self._time_postprocess_start = time.time()
+        self.status = self.model.getAttr("Status")
+        objVal = None
+        objBound = GRB.INFINITY
+        objGap = GRB.INFINITY
+        solutionCount = self.model.getAttr("SolCount")
+
+        if solutionCount > 0:
+            objVal = self.model.getAttr("ObjVal")
+
+        self.status = modelcreator.GurobiStatus(status=self.status,
+                                                solCount=solutionCount,
+                                                objValue=objVal,
+                                                objGap=objGap,
+                                                objBound=objBound,
+                                                integralSolution=False)
+
+        anonymous_decomp_runtimes = []
+        anonymous_init_runtimes = []
+        anonymous_computation_runtimes = []
+        for req in (self.requests):
+            anonymous_decomp_runtimes.append(self.tree_decomp_computation_times[req])
+            anonymous_init_runtimes.append(self.dynvmp_runtimes_initialization[req])
+            anonymous_computation_runtimes.append(self.dynvmp_runtimes_computation[req])
+
+        self.result = SeparationLPSolution(self.time_preprocess,
+                                           self.time_optimization,
+                                           0,
+                                           anonymous_decomp_runtimes,
+                                           anonymous_init_runtimes,
+                                           anonymous_computation_runtimes,
+                                           self.gurobi_runtimes,
+                                           self.status,
+                                           objVal)
+
+        return self.result
+
+    def recover_solution_from_variables(self):
+        pass
+
+
+    ###
+    ###     GUROBI SETTINGS
+    ###     The following is copy-pasted from the basic modelcreator in the alib, as the separation approach
+    ###     breaks the structure of computing a simple LP or IP.
+    ###
+
+    _listOfUserVariableParameters = [Param_MIPGap, Param_IterationLimit, Param_NodeLimit, Param_Heuristics,
+                                     Param_Threads, Param_TimeLimit, Param_Cuts, Param_MIPFocus,
+                                     Param_RootCutPasses,
+                                     Param_NodefileStart, Param_Method, Param_NodeMethod, Param_BarConvTol,
+                                     Param_NumericFocus]
+
+    def apply_gurobi_settings(self, gurobiSettings):
+        ''' Apply gurobi settings.
+
+        :param gurobiSettings:
+        :return:
+        '''
+
+
+        if gurobiSettings.MIPGap is not None:
+            self.set_gurobi_parameter(Param_MIPGap, gurobiSettings.MIPGap)
+        else:
+            self.reset_gurobi_parameter(Param_MIPGap)
+
+        if gurobiSettings.IterationLimit is not None:
+            self.set_gurobi_parameter(Param_IterationLimit, gurobiSettings.IterationLimit)
+        else:
+            self.reset_gurobi_parameter(Param_IterationLimit)
+
+        if gurobiSettings.NodeLimit is not None:
+            self.set_gurobi_parameter(Param_NodeLimit, gurobiSettings.NodeLimit)
+        else:
+            self.reset_gurobi_parameter(Param_NodeLimit)
+
+        if gurobiSettings.Heuristics is not None:
+            self.set_gurobi_parameter(Param_Heuristics, gurobiSettings.Heuristics)
+        else:
+            self.reset_gurobi_parameter(Param_Heuristics)
+
+        if gurobiSettings.Threads is not None:
+            self.set_gurobi_parameter(Param_Threads, gurobiSettings.Threads)
+        else:
+            self.reset_gurobi_parameter(Param_Heuristics)
+
+        if gurobiSettings.TimeLimit is not None:
+            self.set_gurobi_parameter(Param_TimeLimit, gurobiSettings.TimeLimit)
+        else:
+            self.reset_gurobi_parameter(Param_TimeLimit)
+
+        if gurobiSettings.MIPFocus is not None:
+            self.set_gurobi_parameter(Param_MIPFocus, gurobiSettings.MIPFocus)
+        else:
+            self.reset_gurobi_parameter(Param_MIPFocus)
+
+        if gurobiSettings.cuts is not None:
+            self.set_gurobi_parameter(Param_Cuts, gurobiSettings.cuts)
+        else:
+            self.reset_gurobi_parameter(Param_Cuts)
+
+        if gurobiSettings.rootCutPasses is not None:
+            self.set_gurobi_parameter(Param_RootCutPasses, gurobiSettings.rootCutPasses)
+        else:
+            self.reset_gurobi_parameter(Param_RootCutPasses)
+
+        if gurobiSettings.NodefileStart is not None:
+            self.set_gurobi_parameter(Param_NodefileStart, gurobiSettings.NodefileStart)
+        else:
+            self.reset_gurobi_parameter(Param_NodefileStart)
+
+        if gurobiSettings.Method is not None:
+            self.set_gurobi_parameter(Param_Method, gurobiSettings.Method)
+        else:
+            self.reset_gurobi_parameter(Param_Method)
+
+        if gurobiSettings.NodeMethod is not None:
+            self.set_gurobi_parameter(Param_NodeMethod, gurobiSettings.NodeMethod)
+        else:
+            self.reset_gurobi_parameter(Param_NodeMethod)
+
+        if gurobiSettings.BarConvTol is not None:
+            self.set_gurobi_parameter(Param_BarConvTol, gurobiSettings.BarConvTol)
+        else:
+            self.reset_gurobi_parameter(Param_BarConvTol)
+
+        if gurobiSettings.NumericFocus is not None:
+            self.set_gurobi_parameter(Param_NumericFocus, gurobiSettings.NumericFocus)
+        else:
+            self.reset_gurobi_parameter(Param_NumericFocus)
+
+    def reset_all_parameters_to_default(self):
+        for param in self._listOfUserVariableParameters:
+            (name, type, curr, min, max, default) = self.model.getParamInfo(param)
+            self.model.setParam(param, default)
+
+    def reset_gurobi_parameter(self, param):
+        (name, type, curr, min_val, max_val, default) = self.model.getParamInfo(param)
+        self.logger.debug("Parameter {} unchanged".format(param))
+        self.logger.debug("    Prev: {}   Min: {}   Max: {}   Default: {}".format(
+            curr, min_val, max_val, default
+        ))
+        self.model.setParam(param, default)
+
+    def set_gurobi_parameter(self, param, value):
+        (name, type, curr, min_val, max_val, default) = self.model.getParamInfo(param)
+        self.logger.debug("Changed value of parameter {} to {}".format(param, value))
+        self.logger.debug("    Prev: {}   Min: {}   Max: {}   Default: {}".format(
+            curr, min_val, max_val, default
+        ))
+        if not param in self._listOfUserVariableParameters:
+            raise modelcreator.ModelcreatorError("You cannot access the parameter <" + param + ">!")
+        else:
+            self.model.setParam(param, value)
+
+    def getParam(self, param):
+        if not param in self._listOfUserVariableParameters:
+            raise modelcreator.ModelcreatorError("You cannot access the parameter <" + param + ">!")
+        else:
+            self.model.getParam(param)
 
 """ Dynamic Program for Valid Mapping Problem Dyn-VMP """
 
@@ -1532,7 +1879,11 @@ INFINITY = float("inf")
 
 class DynVMPAlgorithm(object):
     """
-    Solve the Valid Mapping Problem using the DYN-VMP algorithm.
+    Solve the Valid Mapping Problem using the DYN-VMP algorithm as presented in the paper. Note that the Optimized version
+    is much quicker in computing solutions and that this vanilla implementation should probably never be used.
+    To reiterate: Semantically, the optimized and the non-optimized versions are the same, but the pre-allocation of numpy.arrays
+    and the pre-computation of indices in these arrays together with matrix operations makes the optimized one significantly (magnitudes!)
+    faster.
     """
 
     def __init__(self, request, substrate):
@@ -1723,7 +2074,6 @@ class DynVMPAlgorithm(object):
         return list(reversed(path))
 
 
-# TODO: inline & improve this function
 def check_if_mappings_are_compatible(bag_1, sub_nodes_1, bag_2, sub_nodes_2):
     intersection = bag_1 & bag_2
     intersection_mapping_1 = [u for (i, u) in zip(sorted(bag_1), sub_nodes_1) if i in intersection]
@@ -1743,7 +2093,13 @@ construct_name_tw_lp = modelcreator.build_construct_name([
 ])
 
 
-class TreewidthModelCreator(modelcreator.AbstractEmbeddingModelCreator):
+class _TreewidthModelCreator(modelcreator.AbstractEmbeddingModelCreator):
+
+    ''' Base for implementing a (not yet published) LP based on tree decompositions. Note that we expect the separation oracle
+        based LP to be (nearly always) quicker than using this one.
+        We have not really tested this implementation and you should probably not use it (without knowing what you are doing).
+
+    '''
     def __init__(self,
                  scenario,
                  precomputed_tree_decompositions=None,  # Allow passing a dict of tree decompositions (mainly for testing)
@@ -1752,12 +2108,12 @@ class TreewidthModelCreator(modelcreator.AbstractEmbeddingModelCreator):
                  lp_output_file=None,
                  potential_iis_filename=None,
                  logger=None):
-        super(TreewidthModelCreator, self).__init__(scenario,
-                                                    gurobi_settings=gurobi_settings,
-                                                    optimization_callback=optimization_callback,
-                                                    lp_output_file=lp_output_file,
-                                                    potential_iis_filename=potential_iis_filename,
-                                                    logger=logger)
+        super(_TreewidthModelCreator, self).__init__(scenario,
+                                                     gurobi_settings=gurobi_settings,
+                                                     optimization_callback=optimization_callback,
+                                                     lp_output_file=lp_output_file,
+                                                     potential_iis_filename=potential_iis_filename,
+                                                     logger=logger)
 
         self.tree_decompositions = {}
         if precomputed_tree_decompositions is not None:
