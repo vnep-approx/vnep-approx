@@ -24,7 +24,6 @@
 import os
 
 import click
-from vnep_approx.to_delete import treewidth_model_experiments, ccr_2018_eval
 
 import alib.cli
 from alib import run_experiment, util
