@@ -4,52 +4,75 @@ import pytest
 
 from alib import datamodel, scenariogeneration, solutions, util
 from vnep_approx import vine
+import vine_test_data as vtd
 
 
-def get_single_edge_req():
-    req = datamodel.Request("test_req")
-    req.add_node("i", 1.0, "t", ["u"])
-    req.add_node("j", 1.0, "t", ["v"])
-    req.add_edge("i", "j", 1.0)
-    req.profit = 1
-    return req
+@pytest.mark.parametrize("test_case", vtd.SHORTEST_PATH_TEST_CASES)
+def test_single_request_embeddings_shortest_path_method(test_case):
+    test_data = vtd.SINGLE_REQUEST_EMBEDDING_TEST_CASES[test_case]
+
+    scenario = vtd.get_test_scenario(test_data)
+
+    v = vine.WiNESingleWindow(scenario, edge_mapping_method=vine.EdgeMappingMethod.SHORTEST_PATH)
+    sol = v.compute_integral_solution()
+    req, m = next(sol.request_mapping.iteritems())  # there should only be one...
+
+    expected_mapping = test_data["expected_integer_solution"]
+    if expected_mapping is None:
+        assert m is None
+    else:
+        assert isinstance(m, solutions.Mapping)
+        assert m.mapping_nodes == expected_mapping["mapping_nodes"]
+        assert m.mapping_edges == expected_mapping["mapping_edges"]
 
 
-def get_single_edge_sub():
-    sub = datamodel.Substrate("test_sub")
-    sub.add_node("u", ["t"], {"t": 1}, {"t": 1})
-    sub.add_node("v", ["t"], {"t": 1}, {"t": 1})
-    sub.add_edge("u", "v", bidirected=False, capacity=1)
-    return sub
+@pytest.mark.parametrize("test_case", vtd.SPLITTABLE_TEST_CASES)
+def test_single_request_embeddings_splittable_path_method(test_case):
+    test_data = vtd.SINGLE_REQUEST_EMBEDDING_TEST_CASES[test_case]
+
+    scenario = vtd.get_test_scenario(test_data)
+
+    v = vine.WiNESingleWindow(scenario, edge_mapping_method=vine.EdgeMappingMethod.SPLITTABLE)
+    sol = v.compute_integral_solution()
+    req, m = next(sol.request_mapping.iteritems())  # there should only be one...
+
+    expected_mapping = test_data["expected_fractional_solution"]
+    if expected_mapping is None:
+        assert m is None
+    else:
+        assert isinstance(m, vine.SplittableMapping)
+        assert m.mapping_nodes == expected_mapping["mapping_nodes"]
+        assert m.mapping_edges == expected_mapping["mapping_edges"]
 
 
-def test_execute_dvine_procedure_single_request():
-    req = get_single_edge_req()
-    scenario = datamodel.Scenario(
-        name="test_scen",
-        requests=[req],
-        substrate=get_single_edge_sub(),
-        objective=datamodel.Objective.MAX_PROFIT,
-    )
+@pytest.mark.parametrize("test_case", vtd.SINGLE_REQUEST_REJECT_EMBEDDING_TEST_CASES)
+def test_single_request_rejected_embeddings(test_case):
+    test_data = vtd.SINGLE_REQUEST_REJECT_EMBEDDING_TEST_CASES[test_case]
+    scenario = vtd.get_test_scenario(test_data)
 
     v = vine.WiNESingleWindow(scenario)
     sol = v.compute_integral_solution()
-    m = sol.request_mapping[req]
 
-    assert m.mapping_nodes == dict(
-        i="u",
-        j="v",
-    )
-    assert m.mapping_edges == {("i", "j"): [("u", "v")]}
+    req, m = next(sol.request_mapping.iteritems())  # there should only be one...
+
+    assert m is None
 
 
 def test_only_one_request_is_embedded_due_to_capacity_limitations():
-    req1 = get_single_edge_req()
-    req2 = get_single_edge_req()
+    sub = vtd.create_test_substrate("single_edge_substrate")
+    req1 = vtd.create_test_request(
+        "single_edge_request", sub,
+        allowed_nodes=dict(i1=["u1"], i2=["u2"])
+    )
+    req2 = vtd.create_test_request(
+        "single_edge_request", sub,
+    )
+    req1.name = "req1"
+    req2.name = "req2"
     scenario = datamodel.Scenario(
         name="test_scen",
         requests=[req1, req2],
-        substrate=get_single_edge_sub(),
+        substrate=sub,
         objective=datamodel.Objective.MAX_PROFIT,
     )
 
@@ -57,31 +80,40 @@ def test_only_one_request_is_embedded_due_to_capacity_limitations():
     sol = v.compute_integral_solution()
     m1 = sol.request_mapping[req1]
     assert m1.mapping_nodes == dict(
-        i="u",
-        j="v",
+        i1="u1",
+        i2="u2",
     )
-    assert m1.mapping_edges == {("i", "j"): [("u", "v")]}
+    assert m1.mapping_edges == {("i1", "i2"): [("u1", "u2")]}
     assert sol.request_mapping[req2] is None
 
 
-def test_only_requests_are_processed_in_profit_order():
-    req1 = get_single_edge_req()
-    req2 = get_single_edge_req()
+def test_requests_are_processed_in_profit_order():
+    sub = vtd.create_test_substrate("single_edge_substrate")
+    req1 = vtd.create_test_request(
+        "single_edge_request", sub,
+        allowed_nodes=dict(i1=["u1"], i2=["u2"])
+    )
+    req2 = vtd.create_test_request(
+        "single_edge_request", sub,
+        allowed_nodes=dict(i1=["u1"], i2=["u2"])
+    )
     req2.profit = req1.profit + 1
 
     scenario = datamodel.Scenario(
         name="test_scen",
         requests=[req1, req2],
-        substrate=get_single_edge_sub(),
+        substrate=sub,
         objective=datamodel.Objective.MAX_PROFIT,
     )
 
     v = vine.WiNESingleWindow(scenario)
     sol = v.compute_integral_solution()
     m = sol.request_mapping[req2]
+
+    # Although req2 is second in the request list, it must be processed first due to its higher profit.
     assert m.mapping_nodes == dict(
-        i="u",
-        j="v",
+        i1="u1",
+        i2="u2",
     )
-    assert m.mapping_edges == {("i", "j"): [("u", "v")]}
+    assert m.mapping_edges == {("i1", "i2"): [("u1", "u2")]}
     assert sol.request_mapping[req1] is None
