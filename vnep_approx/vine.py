@@ -7,6 +7,7 @@ from alib import datamodel as dm
 from alib import mip as mip
 from alib import modelcreator as mc
 from alib import solutions
+from alib import util
 
 
 class NodeMappingMethod(object):
@@ -38,6 +39,10 @@ class WiNESingleWindow(object):
         self.optimization_callback = optimization_callback
         self.lp_output_file = lp_output_file
         self.potential_iis_filename = potential_iis_filename
+
+        if logger is None:
+            logger = util.get_logger(__name__, make_file=False, propagate=True)
+
         self.logger = logger
         self.scenario = scenario
         self.node_mapping_method = node_mapping_method
@@ -145,6 +150,10 @@ class ViNESingleScenario(object):
         self.optimization_callback = optimization_callback
         self.lp_output_file = lp_output_file
         self.potential_iis_filename = potential_iis_filename
+
+        if logger is None:
+            logger = util.get_logger(__name__, make_file=False, propagate=True)
+
         self.logger = logger
         self.scenario = scenario
 
@@ -174,6 +183,7 @@ class ViNESingleScenario(object):
 
         lp_variables = self.solve_vne_lp_relax()
         if lp_variables is None:
+            self.logger.debug("Reject {}: No initial LP solution.".format(request.name))
             return None  # REJECT: no LP solution
         node_variables = lp_variables[self._current_request]["node_vars"]
 
@@ -181,6 +191,7 @@ class ViNESingleScenario(object):
         for i in self._current_request.nodes:
             u = self.node_mapper.get_single_node_mapping(i, node_variables)
             if u is None:
+                self.logger.debug("Reject {}: Node mapping failed for {}.".format(request.name, u))
                 return None  # REJECT: Failed node mapping
             t = request.get_type(i)
             self._provisional_node_allocations[(u, t)] += request.get_node_demand(i)
@@ -194,6 +205,7 @@ class ViNESingleScenario(object):
             raise ValueError("Invalid edge mapping method: {}".format(self.edge_mapping_method))
 
         if mapping is None:
+            self.logger.debug("Reject {}: Edge mapping failed.".format(request.name))
             return None  # REJECT: Failed edge mapping
 
         self._apply_provisional_allocations_to_residual_capacity_substrate()
@@ -254,8 +266,7 @@ class ViNESingleScenario(object):
             mapping.map_edge(ij, lp_vars[ij])
             ij_demand = self._current_request.get_edge_demand(ij)
             for uv, alloc in lp_vars[ij].iteritems():
-                self._provisional_edge_allocations[ij][uv] += alloc * ij_demand
-
+                self._provisional_edge_allocations[uv] += alloc * ij_demand
         return mapping
 
     def solve_vne_lp_relax(self, fixed_node_mappings_dict=None):
