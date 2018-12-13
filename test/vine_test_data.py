@@ -39,6 +39,7 @@ def create_test_request(request_id,
                         test_substrate,
                         reversed_edges=None,
                         allowed_nodes=None,
+                        allowed_edges=None,
                         node_types=None,
                         node_demands=None,
                         edge_demands=None):
@@ -46,6 +47,8 @@ def create_test_request(request_id,
         reversed_edges = set()
     if allowed_nodes is None:
         allowed_nodes = {}
+    if allowed_edges is None:
+        allowed_edges = {}
     if node_types is None:
         node_types = {}
     if node_demands is None:
@@ -66,7 +69,8 @@ def create_test_request(request_id,
         if ij in reversed_edges:
             ij = ij[1], ij[0]
         ij_demand = edge_demands.get(ij, 1.0)
-        request.add_edge(ij[0], ij[1], ij_demand)
+        ij_allowed = allowed_edges.get(ij)
+        request.add_edge(ij[0], ij[1], ij_demand, allowed_edges=ij_allowed)
 
     return request
 
@@ -116,12 +120,14 @@ SHORTEST_PATH_TEST_CASES = [
     "single_edge_request_confluence_substrate_prefer_cheaper_node_cost",
     "single_edge_request_confluence_substrate_split_flow_to_use_cheaper_edge",
     "single_edge_request_confluence_substrate_force_splitted_flow",
+    "respect_edge_mapping_restrictions",
 ]
 
 SPLITTABLE_TEST_CASES = [
     "single_edge_request_and_substrate",
     "single_edge_request_confluence_substrate_split_flow_to_use_cheaper_edge",
     "single_edge_request_confluence_substrate_force_splitted_flow",
+    "respect_edge_mapping_restrictions",
 ]
 
 SINGLE_REQUEST_EMBEDDING_TEST_CASES = dict(
@@ -186,11 +192,12 @@ SINGLE_REQUEST_EMBEDDING_TEST_CASES = dict(
         ),
         substrate_kwargs=dict(
             edge_capacities={
-                ("u1", "u2"): 100.0,
-                ("u1", "u3"): 0.3,
+                ("u1", "u2"): 1.0,
+                ("u1", "u3"): 0.25,
             },
             edge_costs={
-                ("u1", "u3"): 0.5,
+                ("u1", "u2"): 20.0,
+                ("u1", "u3"): 1.0,
             }
         ),
         expected_integer_solution=dict(
@@ -208,7 +215,7 @@ SINGLE_REQUEST_EMBEDDING_TEST_CASES = dict(
                 i2="u3",
             ),
             mapping_edges={
-                ("i1", "i2"): {("u1", "u2"): 0.7, ("u2", "u3"): 0.7, ("u1", "u3"): 0.3}
+                ("i1", "i2"): {("u1", "u2"): 0.75, ("u2", "u3"): 0.75, ("u1", "u3"): 0.25}
             },
         ),
     ),
@@ -223,8 +230,8 @@ SINGLE_REQUEST_EMBEDDING_TEST_CASES = dict(
         ),
         substrate_kwargs=dict(
             edge_capacities={
-                ("u1", "u2"): 0.7,
-                ("u1", "u3"): 0.3,
+                ("u1", "u2"): 0.75,
+                ("u1", "u3"): 0.25,
             }
         ),
         expected_integer_solution=None,
@@ -234,10 +241,48 @@ SINGLE_REQUEST_EMBEDDING_TEST_CASES = dict(
                 i2="u3",
             ),
             mapping_edges={
-                ("i1", "i2"): {("u1", "u2"): 0.7, ("u2", "u3"): 0.7, ("u1", "u3"): 0.3}
+                ("i1", "i2"): {("u1", "u2"): 0.75, ("u2", "u3"): 0.75, ("u1", "u3"): 0.25}
             },
         ),
-    )
+    ),
+    respect_edge_mapping_restrictions=dict(
+        request_id="single_edge_request",
+        substrate_id="confluence_substrate",
+
+        request_kwargs=dict(
+            allowed_nodes=dict(
+                i1=["u1"],
+                i2=["u3"],
+            ),
+            allowed_edges={
+                ("i1", "i2"): {("u1", "u2"), ("u2", "u3")},
+            },
+        ),
+        substrate_kwargs=dict(
+            # make the allowed edges so expensive that the algorithm would never choose them without edge placement restrictions
+            edge_costs={
+                ("u1", "u2"): 10000000,
+                ("u2", "u3"): 10000000,
+                ("u1", "u3"): 1,
+            },
+        ),
+        expected_integer_solution=dict(
+            mapping_nodes=dict(
+                i1="u1", i2="u3",
+            ),
+            mapping_edges={
+                ("i1", "i2"): [("u1", "u2"), ("u2", "u3")]
+            },
+        ),
+        expected_fractional_solution=dict(
+            mapping_nodes=dict(
+                i1="u1", i2="u3",
+            ),
+            mapping_edges={
+                ("i1", "i2"): {("u1", "u2"): 1.0, ("u2", "u3"): 1.0}
+            },
+        ),
+    ),
 )
 
 SINGLE_REQUEST_REJECT_EMBEDDING_TEST_CASES = dict(
@@ -267,5 +312,18 @@ SINGLE_REQUEST_REJECT_EMBEDDING_TEST_CASES = dict(
                 v=dict(t=1000),
             )
         ),
+    ),
+    insufficient_edge_capacity=dict(
+        request_id="single_edge_request",
+        substrate_id="single_edge_substrate",
+        request_kwargs=dict(
+            allowed_nodes=dict(  # forbid colocation for this test case
+                i1=["u1"],
+                i2=["u2"],
+            ),
+            edge_demands={
+                ("i1", "i2"): 1000.0,
+            },
+        )
     ),
 )

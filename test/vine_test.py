@@ -1,19 +1,20 @@
-import random
-
 import pytest
-
-from alib import datamodel, scenariogeneration, solutions, util
-from vnep_approx import vine
 import vine_test_data as vtd
+from vnep_approx import vine
+
+from alib import datamodel, solutions
 
 
+@pytest.mark.parametrize("use_load_balancing", [True, False])
 @pytest.mark.parametrize("test_case", vtd.SHORTEST_PATH_TEST_CASES)
-def test_single_request_embeddings_shortest_path_method(test_case):
+def test_single_request_embeddings_shortest_path_method(use_load_balancing, test_case):
     test_data = vtd.SINGLE_REQUEST_EMBEDDING_TEST_CASES[test_case]
 
     scenario = vtd.get_test_scenario(test_data)
 
-    v = vine.WiNESingleWindow(scenario, edge_mapping_method=vine.EdgeMappingMethod.SHORTEST_PATH)
+    v = vine.WiNESingleWindow(scenario,
+                              edge_mapping_method=vine.EdgeMappingMethod.SHORTEST_PATH,
+                              use_load_balancing_objective=use_load_balancing)
     sol = v.compute_integral_solution()
     req, m = next(sol.request_mapping.iteritems())  # there should only be one...
 
@@ -26,13 +27,16 @@ def test_single_request_embeddings_shortest_path_method(test_case):
         assert m.mapping_edges == expected_mapping["mapping_edges"]
 
 
+@pytest.mark.parametrize("use_load_balancing", [True, False])
 @pytest.mark.parametrize("test_case", vtd.SPLITTABLE_TEST_CASES)
-def test_single_request_embeddings_splittable_path_method(test_case):
+def test_single_request_embeddings_splittable_path_method(use_load_balancing, test_case):
     test_data = vtd.SINGLE_REQUEST_EMBEDDING_TEST_CASES[test_case]
 
     scenario = vtd.get_test_scenario(test_data)
 
-    v = vine.WiNESingleWindow(scenario, edge_mapping_method=vine.EdgeMappingMethod.SPLITTABLE)
+    v = vine.WiNESingleWindow(scenario,
+                              edge_mapping_method=vine.EdgeMappingMethod.SPLITTABLE,
+                              use_load_balancing_objective=use_load_balancing)
     sol = v.compute_integral_solution()
     req, m = next(sol.request_mapping.iteritems())  # there should only be one...
 

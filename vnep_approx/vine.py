@@ -81,6 +81,15 @@ class SplittableMapping(solutions.Mapping):
 class FractionalClassicMCFModel(mip.ClassicMCFModel):
     """ This Modelcreator is used to access the raw LP values. """
 
+    def __init__(self, scenario,
+                 use_load_balancing_objective,
+                 gurobi_settings=None,
+                 logger=None):
+        super(FractionalClassicMCFModel, self).__init__(
+            scenario=scenario, gurobi_settings=gurobi_settings, logger=logger
+        )
+        self.use_load_balancing_objective = use_load_balancing_objective
+
     def recover_fractional_solution_from_variables(self):
         """
         As the ClassicMCFModel does not implement any fractional solution methods, we define this placeholder, which
@@ -123,6 +132,37 @@ class FractionalClassicMCFModel(mip.ClassicMCFModel):
                     self.model.addConstr(fix_i_u_mapping_constraint, GRB.EQUAL, 0.0, name=name)
         self.model.update()
 
+    def create_objective(self):
+        if not self.use_load_balancing_objective:
+            super(FractionalClassicMCFModel, self).create_objective()
+        else:
+            self.plugin_constraint_embed_all_requests()
+            self.plugin_objective_load_balancing()
+
+    def plugin_objective_load_balancing(self):
+        """
+        Adaptation of AbstractEmbeddingModelcreator.plugin_objective_minimize_cost to include the additional
+        coefficients used for load balancing.
+        """
+        delta = 10 ** -6  # small positive constant to avoid division by zero
+        obj_expr = LinExpr()
+        for req in self.requests:
+            for u, v in self.substrate.substrate_edge_resources:
+                lb_coefficient = 1.0 / (self.substrate.get_edge_capacity((u, v)) + delta)
+                obj_expr.addTerms(
+                    lb_coefficient * self.substrate.get_edge_cost((u, v)),
+                    self.var_request_load[req][(u, v)]
+                )
+
+            for ntype, snode in self.substrate.substrate_node_resources:
+                lb_coefficient = 1.0 / (self.substrate.get_node_type_capacity(snode, ntype) + delta)
+                obj_expr.addTerms(
+                    lb_coefficient * self.substrate.get_node_type_cost(snode, ntype),
+                    self.var_request_load[req][(ntype, snode)]
+                )
+
+        self.model.setObjective(obj_expr, GRB.MINIMIZE)
+
 
 class ViNESingleScenario(object):
     """
@@ -132,7 +172,7 @@ class ViNESingleScenario(object):
     A new ViNESingleRequest should be instantiated for each scenario, as the residual capacities are tracked for
     repeated calls to vine_procedure_single_request, updating them whenever a request is embedded.
 
-    By providing an appropriate node_mapper, which must implement the AbstractViNENodeMapper defined below,
+    By providing an appropriate node_mapper, which should implement the AbstractViNENodeMapper defined below,
     either R-ViNE (RandomizedNodeMapper) or D-ViNE (DeterministicNodeMapper) can be used.
     """
 
@@ -215,10 +255,13 @@ class ViNESingleScenario(object):
         for ij in self._current_request.edges:
             i, j = ij
             ij_demand = self._current_request.get_edge_demand(ij)
+            ij_allowed_edges = self._current_request.get_allowed_edges(ij)
+            if ij_allowed_edges is None:
+                ij_allowed_edges = self.residual_capacity_substrate.get_edges()
             u = mapping.get_mapping_of_node(i)
             v = mapping.get_mapping_of_node(j)
             uv_path = self._shortest_substrate_path_respecting_capacities(
-                u, v, ij_demand
+                u, v, ij_demand, ij_allowed_edges,
             )
             if uv_path is None:
                 return None
@@ -227,7 +270,7 @@ class ViNESingleScenario(object):
                 self._provisional_edge_allocations[uv] += ij_demand
         return mapping
 
-    def _shortest_substrate_path_respecting_capacities(self, start, target, min_capacity):
+    def _shortest_substrate_path_respecting_capacities(self, start, target, min_capacity, allowed_edges):
         distance = {node: float("inf") for node in self.residual_capacity_substrate.nodes}
         prev = {u: None for u in self.residual_capacity_substrate.nodes}
         distance[start] = 0
@@ -238,6 +281,8 @@ class ViNESingleScenario(object):
                 break
             q.remove(u)
             for uv in self.residual_capacity_substrate.get_out_edges(u):
+                if uv not in allowed_edges:
+                    continue
                 residual_cap = self.residual_capacity_substrate.get_edge_capacity(uv) - self._provisional_edge_allocations[uv]
                 if residual_cap < min_capacity:
                     continue  # avoid using edges that are too small
@@ -278,7 +323,10 @@ class ViNESingleScenario(object):
         )
 
         sub_mc = FractionalClassicMCFModel(
-            single_req_scenario, gurobi_settings=self.gurobi_settings, logger=self.logger
+            single_req_scenario,
+            use_load_balancing_objective=self.use_load_balancing_objective,
+            gurobi_settings=self.gurobi_settings,
+            logger=self.logger,
         )
         sub_mc.init_model_creator()
         if fixed_node_mappings_dict is not None:
