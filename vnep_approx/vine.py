@@ -34,7 +34,8 @@ class WiNESingleWindow(object):
                  logger=None,
                  node_mapping_method=NodeMappingMethod.DETERMINISTIC,
                  edge_mapping_method=EdgeMappingMethod.SHORTEST_PATH,
-                 use_load_balancing_objective=False):
+                 use_load_balancing_objective=False,
+                 use_costs_with_lb_objective=False):
         self.gurobi_settings = gurobi_settings
         self.optimization_callback = optimization_callback
         self.lp_output_file = lp_output_file
@@ -48,6 +49,7 @@ class WiNESingleWindow(object):
         self.node_mapping_method = node_mapping_method
         self.edge_mapping_method = edge_mapping_method
         self.use_load_balancing_objective = use_load_balancing_objective
+        self.use_costs_with_lb_objective = use_costs_with_lb_objective
 
     def init_modelcreator(self):
         pass
@@ -59,6 +61,7 @@ class WiNESingleWindow(object):
             node_mapping_method=self.node_mapping_method,
             edge_mapping_method=self.edge_mapping_method,
             use_load_balancing_objective=self.use_load_balancing_objective,
+            use_costs_with_lb_objective=self.use_costs_with_lb_objective,
             gurobi_settings=self.gurobi_settings,
             optimization_callback=self.optimization_callback,
             lp_output_file=self.lp_output_file,
@@ -83,12 +86,14 @@ class FractionalClassicMCFModel(mip.ClassicMCFModel):
 
     def __init__(self, scenario,
                  use_load_balancing_objective,
+                 use_costs_with_lb_objective=False,
                  gurobi_settings=None,
                  logger=None):
         super(FractionalClassicMCFModel, self).__init__(
             scenario=scenario, gurobi_settings=gurobi_settings, logger=logger
         )
         self.use_load_balancing_objective = use_load_balancing_objective
+        self.use_costs_with_lb_objective = use_costs_with_lb_objective
 
     def recover_fractional_solution_from_variables(self):
         """
@@ -149,15 +154,19 @@ class FractionalClassicMCFModel(mip.ClassicMCFModel):
         for req in self.requests:
             for u, v in self.substrate.substrate_edge_resources:
                 lb_coefficient = 1.0 / (self.substrate.get_edge_capacity((u, v)) + delta)
+                if self.use_costs_with_lb_objective:
+                    lb_coefficient *= self.substrate.get_edge_cost((u, v))
                 obj_expr.addTerms(
-                    lb_coefficient * self.substrate.get_edge_cost((u, v)),
+                    lb_coefficient,
                     self.var_request_load[req][(u, v)]
                 )
 
             for ntype, snode in self.substrate.substrate_node_resources:
                 lb_coefficient = 1.0 / (self.substrate.get_node_type_capacity(snode, ntype) + delta)
+                if self.use_costs_with_lb_objective:
+                    lb_coefficient *= self.substrate.get_node_type_cost(snode, ntype)
                 obj_expr.addTerms(
-                    lb_coefficient * self.substrate.get_node_type_cost(snode, ntype),
+                    lb_coefficient,
                     self.var_request_load[req][(ntype, snode)]
                 )
 
@@ -181,6 +190,7 @@ class ViNESingleScenario(object):
                  node_mapping_method,
                  edge_mapping_method,
                  use_load_balancing_objective,
+                 use_costs_with_lb_objective=False,
                  gurobi_settings=None,
                  optimization_callback=mc.gurobi_callback,
                  lp_output_file=None,
@@ -200,6 +210,7 @@ class ViNESingleScenario(object):
         self.node_mapping_method = node_mapping_method
         self.edge_mapping_method = edge_mapping_method
         self.use_load_balancing_objective = use_load_balancing_objective
+        self.use_costs_with_lb_objective = use_costs_with_lb_objective
 
         self.residual_capacity_substrate = deepcopy(scenario.substrate)
         if node_mapping_method == NodeMappingMethod.DETERMINISTIC:
@@ -325,6 +336,7 @@ class ViNESingleScenario(object):
         sub_mc = FractionalClassicMCFModel(
             single_req_scenario,
             use_load_balancing_objective=self.use_load_balancing_objective,
+            use_costs_with_lb_objective=self.use_costs_with_lb_objective,
             gurobi_settings=self.gurobi_settings,
             logger=self.logger,
         )

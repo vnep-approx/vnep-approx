@@ -130,6 +130,13 @@ SPLITTABLE_TEST_CASES = [
     "respect_edge_mapping_restrictions",
 ]
 
+# These tests assume that the algorithm considers resource costs.
+# They are ignored when the "pure" load balancing objective is used
+COST_SPECIFIC_TEST_CASES = {
+    "single_edge_request_confluence_substrate_prefer_cheaper_node_cost",
+    "single_edge_request_confluence_substrate_split_flow_to_use_cheaper_edge",
+}
+
 SINGLE_REQUEST_EMBEDDING_TEST_CASES = dict(
     single_edge_request_and_substrate=dict(
         request_id="single_edge_request",
