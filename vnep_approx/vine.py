@@ -1,6 +1,7 @@
 import random
+import time
 from copy import deepcopy
-
+import enum
 from gurobipy import GRB, LinExpr
 
 from alib import datamodel as dm
@@ -8,6 +9,32 @@ from alib import mip as mip
 from alib import modelcreator as mc
 from alib import solutions
 from alib import util
+
+
+@enum.unique
+class ViNERequestMappingStatus(enum.Enum):
+    is_embedded = "is_embedded"
+    initial_lp_failed = "initial_lp_failed"
+    node_mapping_failed = "node_mapping_failed"
+    edge_mapping_failed = "edge_mapping_failed"
+
+
+@enum.unique
+class ViNELPObjective(enum.Enum):
+    LB_IGNORE_COSTS = "LB_IGNORE_COSTS"
+    LB_USE_COSTS = "LB_USE_COSTS"
+    NO_LB_IGNORE_COSTS = "NO_LB_IGNORE_COSTS"
+    NO_LB_USE_COSTS = "NO_LB_USE_COSTS"
+
+    @staticmethod
+    def create_from_name(obj_string):
+        for objective in ViNELPObjective:
+            if objective.name == obj_string:
+                return objective
+
+        raise ValueError("Invalid LP Objective: {} (expected one of {})".format(
+            obj_string, ", ".join(sorted(o.name for o in ViNELPObjective))
+        ))
 
 
 class NodeMappingMethod(object):
@@ -24,6 +51,50 @@ class EdgeMappingMethod(object):
     AVAILABLE_METHODS = [SPLITTABLE, SHORTEST_PATH]
 
 
+class SplittableMapping(solutions.Mapping):
+    EPSILON = 10 ** -5
+
+    def map_edge(self, ij, edge_vars):
+        self.mapping_edges[ij] = {
+            uv: val for (uv, val) in edge_vars.iteritems()
+            if abs(val) >= SplittableMapping.EPSILON
+        }
+
+
+class ViNEResult(mc.AlgorithmResult):
+    def __init__(self, solution, vine_parameters, runtime, runtime_per_request, mapping_status_per_request):
+        self.solution = solution
+        self.runtime = runtime
+        self.runtime_per_request = runtime_per_request
+        self.mapping_status_per_request = mapping_status_per_request
+
+    def get_solution(self):
+        return self.solution
+
+    def _cleanup_references_raw(self, original_scenario):
+        own_scenario = self.solution.scenario
+        self.solution.scenario = original_scenario
+
+        for own_req, original_request in zip(own_scenario.requests, original_scenario.requests):
+            assert own_req.nodes == original_request.nodes
+            assert own_req.edges == original_request.edges
+
+            mapping = self.solution.request_mapping[own_req]
+            del self.solution.request_mapping[own_req]
+            if mapping is not None:
+                mapping.request = original_request
+                mapping.substrate = original_scenario.substrate
+            self.solution.request_mapping[original_request] = mapping
+
+            runtime = self.runtime_per_request[own_req]
+            del self.runtime_per_request[own_req]
+            self.runtime_per_request[original_request] = runtime
+
+            status = self.mapping_status_per_request[own_req]
+            del self.mapping_status_per_request[own_req]
+            self.mapping_status_per_request[original_request] = status
+
+
 class WiNESingleWindow(object):
     def __init__(self,
                  scenario,
@@ -34,8 +105,7 @@ class WiNESingleWindow(object):
                  logger=None,
                  node_mapping_method=NodeMappingMethod.DETERMINISTIC,
                  edge_mapping_method=EdgeMappingMethod.SHORTEST_PATH,
-                 use_load_balancing_objective=False,
-                 use_costs_with_lb_objective=False):
+                 lp_objective=ViNELPObjective.NO_LB_IGNORE_COSTS):
         self.gurobi_settings = gurobi_settings
         self.optimization_callback = optimization_callback
         self.lp_output_file = lp_output_file
@@ -44,56 +114,72 @@ class WiNESingleWindow(object):
         if logger is None:
             logger = util.get_logger(__name__, make_file=False, propagate=True)
 
+        if isinstance(lp_objective, str):
+            lp_objective = ViNELPObjective.create_from_name(lp_objective)
+        self.lp_objective = lp_objective
+
         self.logger = logger
         self.scenario = scenario
         self.node_mapping_method = node_mapping_method
         self.edge_mapping_method = edge_mapping_method
-        self.use_load_balancing_objective = use_load_balancing_objective
-        self.use_costs_with_lb_objective = use_costs_with_lb_objective
 
     def init_modelcreator(self):
         pass
 
     def compute_integral_solution(self):
-        # TODO: Measure runtimes
         vine_instance = ViNESingleScenario(
-            scenario=self.scenario,
+            substrate=self.scenario.substrate,
             node_mapping_method=self.node_mapping_method,
             edge_mapping_method=self.edge_mapping_method,
-            use_load_balancing_objective=self.use_load_balancing_objective,
-            use_costs_with_lb_objective=self.use_costs_with_lb_objective,
+            lp_objective=self.lp_objective,
             gurobi_settings=self.gurobi_settings,
             optimization_callback=self.optimization_callback,
             lp_output_file=self.lp_output_file,
             potential_iis_filename=self.potential_iis_filename,
             logger=self.logger,
         )
+        vine_parameters = dict(
+            node_mapping_method=self.node_mapping_method,
+            edge_mapping_method=self.edge_mapping_method,
+            lp_objective=self.lp_objective.name,
+        )
+
         solution_name = mc.construct_name("solution_", sub_name=self.scenario.name)
         solution = solutions.IntegralScenarioSolution(solution_name, self.scenario)
+
+        overall_runtime_start = time.time()
+        runtime_per_request = {}
+        mapping_status_per_request = {}
         for req in sorted(self.scenario.requests, key=lambda r: r.profit, reverse=True):
-            mapping = vine_instance.vine_procedure_single_request(req)
+            t_start = time.time()
+            mapping, status = vine_instance.vine_procedure_single_request(req)
+
+            runtime_per_request[req] = time.time() - t_start
+            mapping_status_per_request[req] = status
+
             solution.add_mapping(req, mapping)
-        return solution
 
-
-class SplittableMapping(solutions.Mapping):
-    def map_edge(self, ij, edge_vars):
-        self.mapping_edges[ij] = edge_vars
+        overall_runtime = time.time() - overall_runtime_start
+        result = ViNEResult(
+            solution=solution,
+            vine_parameters=vine_parameters,
+            runtime=overall_runtime,
+            runtime_per_request=runtime_per_request,
+            mapping_status_per_request=mapping_status_per_request,
+        )
+        return result
 
 
 class FractionalClassicMCFModel(mip.ClassicMCFModel):
     """ This Modelcreator is used to access the raw LP values. """
 
-    def __init__(self, scenario,
-                 use_load_balancing_objective,
-                 use_costs_with_lb_objective=False,
+    def __init__(self, scenario, lp_objective,
                  gurobi_settings=None,
                  logger=None):
         super(FractionalClassicMCFModel, self).__init__(
             scenario=scenario, gurobi_settings=gurobi_settings, logger=logger
         )
-        self.use_load_balancing_objective = use_load_balancing_objective
-        self.use_costs_with_lb_objective = use_costs_with_lb_objective
+        self.lp_objective = lp_objective
 
     def recover_fractional_solution_from_variables(self):
         """
@@ -138,11 +224,14 @@ class FractionalClassicMCFModel(mip.ClassicMCFModel):
         self.model.update()
 
     def create_objective(self):
-        if not self.use_load_balancing_objective:
-            super(FractionalClassicMCFModel, self).create_objective()
-        else:
+        if isinstance(self.lp_objective, ViNELPObjective):
             self.plugin_constraint_embed_all_requests()
             self.plugin_objective_load_balancing()
+        else:
+            msg = "Invalid LP objective: {}. Expected instance of LPComputationObjective defined above!".format(
+                self.lp_objective
+            )
+            raise ValueError(msg)
 
     def plugin_objective_load_balancing(self):
         """
@@ -153,24 +242,48 @@ class FractionalClassicMCFModel(mip.ClassicMCFModel):
         obj_expr = LinExpr()
         for req in self.requests:
             for u, v in self.substrate.substrate_edge_resources:
-                lb_coefficient = 1.0 / (self.substrate.get_edge_capacity((u, v)) + delta)
-                if self.use_costs_with_lb_objective:
-                    lb_coefficient *= self.substrate.get_edge_cost((u, v))
+                cost = self.substrate.get_edge_cost((u, v))
+                capacity = self.substrate.get_edge_capacity((u, v)) + delta
+
+                lb_coefficient = self._get_objective_coefficient(capacity, cost)
+
                 obj_expr.addTerms(
                     lb_coefficient,
                     self.var_request_load[req][(u, v)]
                 )
 
             for ntype, snode in self.substrate.substrate_node_resources:
-                lb_coefficient = 1.0 / (self.substrate.get_node_type_capacity(snode, ntype) + delta)
-                if self.use_costs_with_lb_objective:
-                    lb_coefficient *= self.substrate.get_node_type_cost(snode, ntype)
+                cost = self.substrate.get_node_type_cost(snode, ntype)
+                capacity = self.substrate.get_node_type_capacity(snode, ntype) + delta
+
+                lb_coefficient = self._get_objective_coefficient(capacity, cost)
+
                 obj_expr.addTerms(
                     lb_coefficient,
                     self.var_request_load[req][(ntype, snode)]
                 )
 
         self.model.setObjective(obj_expr, GRB.MINIMIZE)
+
+    def _get_objective_coefficient(self, capacity, cost):
+        if self.lp_objective == ViNELPObjective.NO_LB_IGNORE_COSTS:
+            # alpha = beta = residual_capacity, and the coefficient is 1 (ignoring the tiny delta value)
+            lb_coefficient = 1.0
+        elif self.lp_objective == ViNELPObjective.LB_IGNORE_COSTS:
+            # alpha = beta = 1, and the coefficient is the reciprocal of the remaining capacity
+            lb_coefficient = 1.0 / capacity
+        elif self.lp_objective == ViNELPObjective.NO_LB_USE_COSTS:
+            # corresponds to ClassicMCFModel's default MIN_COST objective
+            lb_coefficient = cost
+        elif self.lp_objective == ViNELPObjective.LB_USE_COSTS:
+            # combines the MIN_COST objective with the load balancing approach
+            lb_coefficient = cost / capacity
+        else:
+            msg = "Invalid LP objective: {}. Expected instance of LPComputationObjective defined above!".format(
+                self.lp_objective
+            )
+            raise ValueError(msg)
+        return lb_coefficient
 
 
 class ViNESingleScenario(object):
@@ -186,11 +299,10 @@ class ViNESingleScenario(object):
     """
 
     def __init__(self,
-                 scenario,
+                 substrate,
                  node_mapping_method,
                  edge_mapping_method,
-                 use_load_balancing_objective,
-                 use_costs_with_lb_objective=False,
+                 lp_objective,
                  gurobi_settings=None,
                  optimization_callback=mc.gurobi_callback,
                  lp_output_file=None,
@@ -205,14 +317,13 @@ class ViNESingleScenario(object):
             logger = util.get_logger(__name__, make_file=False, propagate=True)
 
         self.logger = logger
-        self.scenario = scenario
+        self.original_substrate = substrate
+        self.residual_capacity_substrate = deepcopy(substrate)
 
         self.node_mapping_method = node_mapping_method
         self.edge_mapping_method = edge_mapping_method
-        self.use_load_balancing_objective = use_load_balancing_objective
-        self.use_costs_with_lb_objective = use_costs_with_lb_objective
+        self.lp_objective = lp_objective
 
-        self.residual_capacity_substrate = deepcopy(scenario.substrate)
         if node_mapping_method == NodeMappingMethod.DETERMINISTIC:
             self.node_mapper = DeterministicNodeMapper()
         elif node_mapping_method == NodeMappingMethod.RANDOMIZED:
@@ -234,16 +345,16 @@ class ViNESingleScenario(object):
 
         lp_variables = self.solve_vne_lp_relax()
         if lp_variables is None:
-            self.logger.debug("Reject {}: No initial LP solution.".format(request.name))
-            return None  # REJECT: no LP solution
+            self.logger.debug("Rejected {}: No initial LP solution.".format(request.name))
+            return None, ViNERequestMappingStatus.initial_lp_failed  # REJECT: no LP solution
         node_variables = lp_variables[self._current_request]["node_vars"]
 
         mapping = self._get_empty_mapping_of_correct_type()
         for i in self._current_request.nodes:
             u = self.node_mapper.get_single_node_mapping(i, node_variables)
             if u is None:
-                self.logger.debug("Reject {}: Node mapping failed for {}.".format(request.name, u))
-                return None  # REJECT: Failed node mapping
+                self.logger.debug("Rejected {}: Node mapping failed for {}.".format(request.name, u))
+                return None, ViNERequestMappingStatus.node_mapping_failed  # REJECT: Failed node mapping
             t = request.get_type(i)
             self._provisional_node_allocations[(u, t)] += request.get_node_demand(i)
             mapping.map_node(i, u)
@@ -256,11 +367,12 @@ class ViNESingleScenario(object):
             raise ValueError("Invalid edge mapping method: {}".format(self.edge_mapping_method))
 
         if mapping is None:
-            self.logger.debug("Reject {}: Edge mapping failed.".format(request.name))
-            return None  # REJECT: Failed edge mapping
+            self.logger.debug("Rejected {}: Edge mapping failed.".format(request.name))
+            return None, ViNERequestMappingStatus.edge_mapping_failed  # REJECT: Failed edge mapping
 
+        self.logger.debug("Embedding of {} succeeded: Applying provisional allocations".format(request.name))
         self._apply_provisional_allocations_to_residual_capacity_substrate()
-        return mapping
+        return mapping, ViNERequestMappingStatus.is_embedded
 
     def _map_edges_shortest_path(self, mapping):
         for ij in self._current_request.edges:
@@ -327,7 +439,7 @@ class ViNESingleScenario(object):
 
     def solve_vne_lp_relax(self, fixed_node_mappings_dict=None):
         single_req_scenario = dm.Scenario(
-            name="{}_{}".format(self.scenario.name, self._current_request.name),
+            name="vine_{}".format(self._current_request.name),
             substrate=self.residual_capacity_substrate,
             requests=[self._current_request],
             objective=dm.Objective.MIN_COST,
@@ -335,8 +447,7 @@ class ViNESingleScenario(object):
 
         sub_mc = FractionalClassicMCFModel(
             single_req_scenario,
-            use_load_balancing_objective=self.use_load_balancing_objective,
-            use_costs_with_lb_objective=self.use_costs_with_lb_objective,
+            lp_objective=self.lp_objective,
             gurobi_settings=self.gurobi_settings,
             logger=self.logger,
         )
@@ -375,14 +486,20 @@ class ViNESingleScenario(object):
 
     def _get_empty_mapping_of_correct_type(self):
         if self.edge_mapping_method == EdgeMappingMethod.SHORTEST_PATH:
+            name = mc.construct_name(
+                "shortest_path_mapping_", req_name=self._current_request.name, sub_name=self.original_substrate.name
+            )
             return solutions.Mapping(
-                "{}_{}".format(self.scenario.name, self._current_request.name),
-                self._current_request, self.scenario.substrate, is_embedded=True,
+                name,
+                self._current_request, self.original_substrate, is_embedded=True,
             )
         elif self.edge_mapping_method == EdgeMappingMethod.SPLITTABLE:
+            name = mc.construct_name(
+                "splittable_mapping_", req_name=self._current_request.name, sub_name=self.original_substrate.name
+            )
             return SplittableMapping(
-                "{}_{}".format(self.scenario.name, self._current_request.name),
-                self._current_request, self.scenario.substrate, is_embedded=True,
+                name,
+                self._current_request, self.original_substrate, is_embedded=True,
             )
         else:
             raise ValueError("Invalid edge mapping method: {}".format(self.edge_mapping_method))
