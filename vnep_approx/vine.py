@@ -12,7 +12,7 @@ from alib import util
 
 
 @enum.unique
-class ViNERequestMappingStatus(enum.Enum):
+class ViNEMappingStatus(enum.Enum):
     is_embedded = "is_embedded"
     initial_lp_failed = "initial_lp_failed"
     node_mapping_failed = "node_mapping_failed"
@@ -51,20 +51,11 @@ class EdgeMappingMethod(object):
     AVAILABLE_METHODS = [SPLITTABLE, SHORTEST_PATH]
 
 
-class SplittableMapping(solutions.Mapping):
-    EPSILON = 10 ** -5
-
-    def map_edge(self, ij, edge_vars):
-        self.mapping_edges[ij] = {
-            uv: val for (uv, val) in edge_vars.iteritems()
-            if abs(val) >= SplittableMapping.EPSILON
-        }
-
-
 class ViNEResult(mc.AlgorithmResult):
     def __init__(self, solution, vine_parameters, runtime, runtime_per_request, mapping_status_per_request):
         self.solution = solution
-        self.runtime = runtime
+        self.vine_parameters = vine_parameters
+        self.total_runtime = runtime
         self.runtime_per_request = runtime_per_request
         self.mapping_status_per_request = mapping_status_per_request
 
@@ -93,6 +84,16 @@ class ViNEResult(mc.AlgorithmResult):
             status = self.mapping_status_per_request[own_req]
             del self.mapping_status_per_request[own_req]
             self.mapping_status_per_request[original_request] = status
+
+
+class SplittableMapping(solutions.Mapping):
+    EPSILON = 10 ** -5
+
+    def map_edge(self, ij, edge_vars):
+        self.mapping_edges[ij] = {
+            uv: val for (uv, val) in edge_vars.iteritems()
+            if abs(val) >= SplittableMapping.EPSILON
+        }
 
 
 class WiNESingleWindow(object):
@@ -245,10 +246,8 @@ class FractionalClassicMCFModel(mip.ClassicMCFModel):
                 cost = self.substrate.get_edge_cost((u, v))
                 capacity = self.substrate.get_edge_capacity((u, v)) + delta
 
-                lb_coefficient = self._get_objective_coefficient(capacity, cost)
-
                 obj_expr.addTerms(
-                    lb_coefficient,
+                    self._get_objective_coefficient(capacity, cost),
                     self.var_request_load[req][(u, v)]
                 )
 
@@ -256,10 +255,8 @@ class FractionalClassicMCFModel(mip.ClassicMCFModel):
                 cost = self.substrate.get_node_type_cost(snode, ntype)
                 capacity = self.substrate.get_node_type_capacity(snode, ntype) + delta
 
-                lb_coefficient = self._get_objective_coefficient(capacity, cost)
-
                 obj_expr.addTerms(
-                    lb_coefficient,
+                    self._get_objective_coefficient(capacity, cost),
                     self.var_request_load[req][(ntype, snode)]
                 )
 
@@ -346,7 +343,8 @@ class ViNESingleScenario(object):
         lp_variables = self.solve_vne_lp_relax()
         if lp_variables is None:
             self.logger.debug("Rejected {}: No initial LP solution.".format(request.name))
-            return None, ViNERequestMappingStatus.initial_lp_failed  # REJECT: no LP solution
+            return None, ViNEMappingStatus.initial_lp_failed  # REJECT: no LP solution
+
         node_variables = lp_variables[self._current_request]["node_vars"]
 
         mapping = self._get_empty_mapping_of_correct_type()
@@ -354,7 +352,8 @@ class ViNESingleScenario(object):
             u = self.node_mapper.get_single_node_mapping(i, node_variables)
             if u is None:
                 self.logger.debug("Rejected {}: Node mapping failed for {}.".format(request.name, u))
-                return None, ViNERequestMappingStatus.node_mapping_failed  # REJECT: Failed node mapping
+                return None, ViNEMappingStatus.node_mapping_failed  # REJECT: Failed node mapping
+
             t = request.get_type(i)
             self._provisional_node_allocations[(u, t)] += request.get_node_demand(i)
             mapping.map_node(i, u)
@@ -368,11 +367,11 @@ class ViNESingleScenario(object):
 
         if mapping is None:
             self.logger.debug("Rejected {}: Edge mapping failed.".format(request.name))
-            return None, ViNERequestMappingStatus.edge_mapping_failed  # REJECT: Failed edge mapping
+            return None, ViNEMappingStatus.edge_mapping_failed  # REJECT: Failed edge mapping
 
-        self.logger.debug("Embedding of {} succeeded: Applying provisional allocations".format(request.name))
+        self.logger.debug("Embedding of {} succeeded: Applying provisional allocations.".format(request.name))
         self._apply_provisional_allocations_to_residual_capacity_substrate()
-        return mapping, ViNERequestMappingStatus.is_embedded
+        return mapping, ViNEMappingStatus.is_embedded
 
     def _map_edges_shortest_path(self, mapping):
         for ij in self._current_request.edges:
@@ -439,7 +438,7 @@ class ViNESingleScenario(object):
 
     def solve_vne_lp_relax(self, fixed_node_mappings_dict=None):
         single_req_scenario = dm.Scenario(
-            name="vine_{}".format(self._current_request.name),
+            name="vine_scenario_{}".format(self._current_request.name),
             substrate=self.residual_capacity_substrate,
             requests=[self._current_request],
             objective=dm.Objective.MIN_COST,
@@ -454,8 +453,8 @@ class ViNESingleScenario(object):
         sub_mc.init_model_creator()
         if fixed_node_mappings_dict is not None:
             sub_mc.create_constraints_fix_node_mappings(self._current_request, fixed_node_mappings_dict)
-        lp_variables = sub_mc.compute_fractional_solution()
-        return lp_variables
+        lp_variable_assignment = sub_mc.compute_fractional_solution()
+        return lp_variable_assignment
 
     def _initialize_provisional_allocations(self):
         self._provisional_node_allocations = {
@@ -490,16 +489,14 @@ class ViNESingleScenario(object):
                 "shortest_path_mapping_", req_name=self._current_request.name, sub_name=self.original_substrate.name
             )
             return solutions.Mapping(
-                name,
-                self._current_request, self.original_substrate, is_embedded=True,
+                name, self._current_request, self.original_substrate, is_embedded=True,
             )
         elif self.edge_mapping_method == EdgeMappingMethod.SPLITTABLE:
             name = mc.construct_name(
                 "splittable_mapping_", req_name=self._current_request.name, sub_name=self.original_substrate.name
             )
             return SplittableMapping(
-                name,
-                self._current_request, self.original_substrate, is_embedded=True,
+                name, self._current_request, self.original_substrate, is_embedded=True,
             )
         else:
             raise ValueError("Invalid edge mapping method: {}".format(self.edge_mapping_method))
