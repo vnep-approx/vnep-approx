@@ -4,9 +4,10 @@ install_requires = [
     # "gurobipy",  # install this manually
     # "alib",
     # "basemap",  # install this manually
-    "click",
-    "matplotlib",
+    "click==6.7",
+    "matplotlib>=2.2,<2.3",
     "numpy",
+    "subprocess32",
 ]
 
 setup(
