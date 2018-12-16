@@ -23,7 +23,7 @@
 
 import itertools
 import os
-import subprocess
+import subprocess32 as subprocess
 from collections import deque
 import numpy as np
 import time
@@ -1220,10 +1220,19 @@ class TreeDecompositionComputation(object):
     It assumes that the path to the tree decomposition algorithm is stored in the environment variable PACE_TD_ALGORITHM_PATH
     """
 
-    def __init__(self, graph):
+    def __init__(self, graph, logger=None, timeout=None):
         self.graph = graph
+        self.timeout = timeout
+        if logger is None:
+            self.logger = util.get_logger(__name__, make_file=False, propagate=True)
+        else:
+            self.logger = logger
+
         self.map_nodes_to_numeric_id = None
         self.map_numeric_id_to_nodes = None
+
+
+
 
     def compute_tree_decomposition(self):
         td_alg_input = self._convert_graph_to_td_input_format()
@@ -1236,7 +1245,13 @@ class TreeDecompositionComputation(object):
         os.chdir(PACE_TD_ALGORITHM_PATH)
         try:
             p = subprocess.Popen("./tw-exact", stdin=subprocess.PIPE, stdout=subprocess.PIPE)
-            stdoutdata, stderrdata = p.communicate(input=td_alg_input)
+            stdoutdata, stderrdata = None, None
+            try:
+                stdoutdata, stderrdata = p.communicate(input=td_alg_input, timeout=self.timeout)
+            except subprocess.TimeoutExpired:
+                self.logger.info("Timeout expired when trying to compute tree decomposition. Killing process and discarding potential result.")
+                p.kill()
+                p.communicate()
             if not stderrdata:
                 result = self._convert_result_format_to_tree_decomposition(stdoutdata)
         except subprocess.CalledProcessError as e:
@@ -1286,8 +1301,8 @@ class TreeDecompositionComputation(object):
         return "bag_{}".format(numeric_id)
 
 
-def compute_tree_decomposition(request):
-    return TreeDecompositionComputation(request).compute_tree_decomposition()
+def compute_tree_decomposition(request, logger=None, timeout=None):
+    return TreeDecompositionComputation(request, logger=logger, timeout=timeout).compute_tree_decomposition()
 
 ### Now comes the Separation LP ###
 
