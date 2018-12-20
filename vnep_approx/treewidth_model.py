@@ -275,7 +275,7 @@ class SmallSemiNiceTDArb(TreeDecomposition):
 
     def _merge_nodes(self, node_to_remove, node_to_keep):
 
-            neighbors_of_removed_node = self.get_neighbors(node_to_remove)
+            neighbors_of_removed_node = set(self.get_neighbors(node_to_remove))
 
             if not node_to_keep in neighbors_of_removed_node:
                 raise ValueError("Seems as if the node_to_keep is not connected to the node_to_remove.")
