@@ -28,6 +28,7 @@ import click
 import alib.cli
 from alib import run_experiment, util
 from . import modelcreator_ecg_decomposition, randomized_rounding_triumvirate
+from . import treewidth_model
 
 
 @click.group()
@@ -82,8 +83,8 @@ def start_experiment(experiment_yaml,
     )
 
     run_experiment.register_algorithm(
-        ccr_2018_eval.SeparationLP_DynVMP.ALGORITHM_ID,
-        ccr_2018_eval.SeparationLP_DynVMP
+        treewidth_model.SeparationLP_OptDynVMP.ALGORITHM_ID,
+        treewidth_model.SeparationLP_OptDynVMP
     )
 
     run_experiment.register_algorithm(
