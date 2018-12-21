@@ -1230,7 +1230,7 @@ class TreeDecompositionComputation(object):
 
         self.map_nodes_to_numeric_id = None
         self.map_numeric_id_to_nodes = None
-        self.DEBUG_MODE = FALSE
+        self.DEBUG_MODE = False
 
 
 
