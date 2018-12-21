@@ -31,15 +31,15 @@ def test_hardcoded_decompositions_are_valid(request_id):
     assert tree_decomp.is_tree_decomposition(req)
 
 
-@pytest.mark.parametrize("request_id",
-                         NICE_TREE_DECOMPOSITIONS)
-def test_nice_tree_decompositions_are_recognized(request_id):
-    req = create_test_request(request_id=request_id)
-    tree_decomp = create_test_tree_decomposition(NICE_TREE_DECOMPOSITIONS[request_id])
-    arborescence = tree_decomp.convert_to_arborescence(NICE_TREE_DECOMPOSITIONS[request_id]["root"])
-
-    assert tree_decomp.is_tree_decomposition(req)
-    assert treewidth_model.is_nice_tree_decomposition(tree_decomp, arborescence)
+# @pytest.mark.parametrize("request_id",
+#                          NICE_TREE_DECOMPOSITIONS)
+# def test_nice_tree_decompositions_are_recognized(request_id):
+#     req = create_test_request(request_id=request_id)
+#     tree_decomp = create_test_tree_decomposition(NICE_TREE_DECOMPOSITIONS[request_id])
+#     arborescence = tree_decomp.convert_to_arborescence(NICE_TREE_DECOMPOSITIONS[request_id]["root"])
+#
+#     assert tree_decomp.is_tree_decomposition(req)
+#     assert treewidth_model.is_nice_tree_decomposition(tree_decomp, arborescence)
 
 
 #DEFERRED
