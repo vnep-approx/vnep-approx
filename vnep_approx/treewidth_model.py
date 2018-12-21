@@ -53,9 +53,9 @@ class TreeDecomposition(datamodel.UndirectedGraph):
         :return: None
         '''
         if not node_bag:
-            raise ValueError("Empty or unspecified node bag: {node_bag}")
+            raise ValueError("Empty or unspecified node bag: {}".format(node_bag))
         if not isinstance(node_bag, frozenset):
-            raise ValueError("Expected node bag as frozenset: {node_bag}")
+            raise ValueError("Expected node bag as frozenset: {}".format(node_bag))
         super(TreeDecomposition, self).add_node(node)
         self.node_bag_dict[node] = node_bag
         # edges_to_create = set()
@@ -1230,6 +1230,7 @@ class TreeDecompositionComputation(object):
 
         self.map_nodes_to_numeric_id = None
         self.map_numeric_id_to_nodes = None
+        self.DEBUG_MODE = FALSE
 
 
 
@@ -1272,6 +1273,11 @@ class TreeDecompositionComputation(object):
                 self.map_nodes_to_numeric_id[i],
                 self.map_nodes_to_numeric_id[j],
             ))
+        if self.DEBUG_MODE: #TODO make output file unique
+            with open("pace_request.txt", "w") as f:
+                f.write("\n".join(lines))
+                f.write("{}".format(self.map_nodes_to_numeric_id))
+                f.write("{}".format(self.map_numeric_id_to_nodes))
         return "\n".join(lines)
 
     def _convert_result_format_to_tree_decomposition(self, computation_stdout):
