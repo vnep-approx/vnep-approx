@@ -29,6 +29,7 @@ import alib.cli
 from alib import run_experiment, util
 from . import modelcreator_ecg_decomposition, randomized_rounding_triumvirate
 from . import treewidth_model
+from . import vine
 
 
 @click.group()
@@ -42,25 +43,6 @@ def cli():
 @click.option('--threads', default=1)
 def generate_scenarios(scenario_output_file, parameters, threads):
     alib.cli.f_generate_scenarios(scenario_output_file, parameters, threads)
-
-
-@cli.command()
-@click.argument('parameters', type=click.File('r'))
-@click.option('--threads', default=1)
-def treewidth_evaluation(parameters, threads):
-    f_treewidth_evaluation(parameters, threads)
-
-
-def f_treewidth_evaluation(parameter_file, threads):
-    click.echo('Generate Scenarios for evaluation of the treewidth model')
-
-    util.ExperimentPathHandler.initialize()
-
-    file_basename = os.path.basename(parameter_file.name).split(".")[0].lower()
-    log_file = os.path.join(util.ExperimentPathHandler.LOG_DIR, "{}_parent.log".format(file_basename))
-    output_file = os.path.join(util.ExperimentPathHandler.OUTPUT_DIR, "{}_results_{{process_index}}.pickle".format(file_basename))
-    util.initialize_root_logger(log_file)
-    treewidth_model_experiments.run_experiment_from_yaml(parameter_file, output_file, threads)
 
 
 @cli.command()
@@ -90,6 +72,19 @@ def start_experiment(experiment_yaml,
     run_experiment.register_algorithm(
         randomized_rounding_triumvirate.RandomizedRoundingTriumvirate.ALGORITHM_ID,
         randomized_rounding_triumvirate.RandomizedRoundingTriumvirate
+    )
+
+
+    run_experiment.register_algorithm(
+        vine.OfflineViNEAlgorithmCollection.ALGORITHM_ID,
+        vine.OfflineViNEAlgorithmCollection
+    )
+
+
+
+    run_experiment.register_algorithm(
+        treewidth_model.RandRoundSepLPOptDynVMP.ALGORITHM_ID,
+        treewidth_model.RandRoundSepLPOptDynVMP
     )
 
     run_experiment.run_experiment(
