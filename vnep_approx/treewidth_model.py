@@ -26,12 +26,16 @@ import os
 import subprocess32 as subprocess
 from collections import deque
 import numpy as np
+import random
 import time
 from heapq import heappush, heappop
+
 
 import gurobipy
 from gurobipy import GRB, LinExpr
 from alib import datamodel, modelcreator, solutions, util
+
+from . import randomized_rounding_triumvirate as rrt
 
 """ This module contains data structures and algorithms related to treewidth based approximation approaches """
 
@@ -1643,7 +1647,7 @@ class SeparationLP_OptDynVMP(object):
         current_obj = 0
         #the abortion criterion here is not perfect and should probably depend on the relative error instead of the
         #absolute one.
-        while new_columns_generated and abs(current_obj-last_obj) > 0.0001:
+        while new_columns_generated and abs(current_obj-last_obj) > 0.1:
             gurobi_runtime = time.time()
             self.model.optimize()
             last_obj = current_obj
@@ -1694,6 +1698,641 @@ class SeparationLP_OptDynVMP(object):
                                            objVal)
 
         return self.result
+
+    def recover_solution_from_variables(self):
+        pass
+
+
+    ###
+    ###     GUROBI SETTINGS
+    ###     The following is copy-pasted from the basic modelcreator in the alib, as the separation approach
+    ###     breaks the structure of computing a simple LP or IP.
+    ###
+
+    _listOfUserVariableParameters = [Param_MIPGap, Param_IterationLimit, Param_NodeLimit, Param_Heuristics,
+                                     Param_Threads, Param_TimeLimit, Param_Cuts, Param_MIPFocus,
+                                     Param_RootCutPasses,
+                                     Param_NodefileStart, Param_Method, Param_NodeMethod, Param_BarConvTol,
+                                     Param_NumericFocus]
+
+    def apply_gurobi_settings(self, gurobiSettings):
+        ''' Apply gurobi settings.
+
+        :param gurobiSettings:
+        :return:
+        '''
+
+
+        if gurobiSettings.MIPGap is not None:
+            self.set_gurobi_parameter(Param_MIPGap, gurobiSettings.MIPGap)
+        else:
+            self.reset_gurobi_parameter(Param_MIPGap)
+
+        if gurobiSettings.IterationLimit is not None:
+            self.set_gurobi_parameter(Param_IterationLimit, gurobiSettings.IterationLimit)
+        else:
+            self.reset_gurobi_parameter(Param_IterationLimit)
+
+        if gurobiSettings.NodeLimit is not None:
+            self.set_gurobi_parameter(Param_NodeLimit, gurobiSettings.NodeLimit)
+        else:
+            self.reset_gurobi_parameter(Param_NodeLimit)
+
+        if gurobiSettings.Heuristics is not None:
+            self.set_gurobi_parameter(Param_Heuristics, gurobiSettings.Heuristics)
+        else:
+            self.reset_gurobi_parameter(Param_Heuristics)
+
+        if gurobiSettings.Threads is not None:
+            self.set_gurobi_parameter(Param_Threads, gurobiSettings.Threads)
+        else:
+            self.reset_gurobi_parameter(Param_Heuristics)
+
+        if gurobiSettings.TimeLimit is not None:
+            self.set_gurobi_parameter(Param_TimeLimit, gurobiSettings.TimeLimit)
+        else:
+            self.reset_gurobi_parameter(Param_TimeLimit)
+
+        if gurobiSettings.MIPFocus is not None:
+            self.set_gurobi_parameter(Param_MIPFocus, gurobiSettings.MIPFocus)
+        else:
+            self.reset_gurobi_parameter(Param_MIPFocus)
+
+        if gurobiSettings.cuts is not None:
+            self.set_gurobi_parameter(Param_Cuts, gurobiSettings.cuts)
+        else:
+            self.reset_gurobi_parameter(Param_Cuts)
+
+        if gurobiSettings.rootCutPasses is not None:
+            self.set_gurobi_parameter(Param_RootCutPasses, gurobiSettings.rootCutPasses)
+        else:
+            self.reset_gurobi_parameter(Param_RootCutPasses)
+
+        if gurobiSettings.NodefileStart is not None:
+            self.set_gurobi_parameter(Param_NodefileStart, gurobiSettings.NodefileStart)
+        else:
+            self.reset_gurobi_parameter(Param_NodefileStart)
+
+        if gurobiSettings.Method is not None:
+            self.set_gurobi_parameter(Param_Method, gurobiSettings.Method)
+        else:
+            self.reset_gurobi_parameter(Param_Method)
+
+        if gurobiSettings.NodeMethod is not None:
+            self.set_gurobi_parameter(Param_NodeMethod, gurobiSettings.NodeMethod)
+        else:
+            self.reset_gurobi_parameter(Param_NodeMethod)
+
+        if gurobiSettings.BarConvTol is not None:
+            self.set_gurobi_parameter(Param_BarConvTol, gurobiSettings.BarConvTol)
+        else:
+            self.reset_gurobi_parameter(Param_BarConvTol)
+
+        if gurobiSettings.NumericFocus is not None:
+            self.set_gurobi_parameter(Param_NumericFocus, gurobiSettings.NumericFocus)
+        else:
+            self.reset_gurobi_parameter(Param_NumericFocus)
+
+    def reset_all_parameters_to_default(self):
+        for param in self._listOfUserVariableParameters:
+            (name, type, curr, min, max, default) = self.model.getParamInfo(param)
+            self.model.setParam(param, default)
+
+    def reset_gurobi_parameter(self, param):
+        (name, type, curr, min_val, max_val, default) = self.model.getParamInfo(param)
+        self.logger.debug("Parameter {} unchanged".format(param))
+        self.logger.debug("    Prev: {}   Min: {}   Max: {}   Default: {}".format(
+            curr, min_val, max_val, default
+        ))
+        self.model.setParam(param, default)
+
+    def set_gurobi_parameter(self, param, value):
+        (name, type, curr, min_val, max_val, default) = self.model.getParamInfo(param)
+        self.logger.debug("Changed value of parameter {} to {}".format(param, value))
+        self.logger.debug("    Prev: {}   Min: {}   Max: {}   Default: {}".format(
+            curr, min_val, max_val, default
+        ))
+        if not param in self._listOfUserVariableParameters:
+            raise modelcreator.ModelcreatorError("You cannot access the parameter <" + param + ">!")
+        else:
+            self.model.setParam(param, value)
+
+    def getParam(self, param):
+        if not param in self._listOfUserVariableParameters:
+            raise modelcreator.ModelcreatorError("You cannot access the parameter <" + param + ">!")
+        else:
+            self.model.getParam(param)
+
+
+
+
+class RandRoundSepLPOptDynVMP(object):
+    ALGORITHM_ID = "RandRoundSepLPOptDynVMP"
+
+    '''
+        Allows the computation of LP solutions using OptDynVMP as a separation oracle.
+        Currently, this is only implemented for the Max Profit Objective, but the min cost objective should be easy to
+        handle as well.
+    '''
+
+    def __init__(self,
+                 scenario,
+                 gurobi_settings=None,
+                 logger=None):
+        self.scenario = scenario
+        self.substrate = self.scenario.substrate
+        self.requests = self.scenario.requests
+        self.objective = self.scenario.objective
+
+        if self.objective == datamodel.Objective.MAX_PROFIT:
+            pass
+        elif self.objective == datamodel.Objective.MIN_COST:
+            raise ValueError("The separation LP algorithm can at the moment just handle max-profit instances.")
+        else:
+            raise ValueError("The separation LP algorithm can at the moment just handle max-profit instances.")
+
+        self.gurobi_settings = gurobi_settings
+
+        self.model = None  # the model of gurobi
+        self.status = None  # GurobiStatus instance
+        self.solution = None  # either a integral solution or a fractional one
+
+        self.temporal_log = modelcreator.TemporalLog()
+
+        self.time_preprocess = None
+        self.time_optimization = None
+        self.time_postprocessing = None
+        self._time_postprocess_start = None
+
+        if logger is None:
+            self.logger = util.get_logger(__name__, make_file=False, propagate=True)
+        else:
+            self.logger = logger
+
+    def init_model_creator(self):
+        ''' Initializes the modelcreator by generating the model. Afterwards, model.compute() can be called to let
+            Gurobi solve the model.
+
+        :return:
+        '''
+
+        time_preprocess_start = time.time()
+
+        self.model = gurobipy.Model("column_generation_is_smooth")  #name doesn't matter...
+        self.model._mc = self
+
+        self.model.setParam("LogToConsole", 1)
+
+        if self.gurobi_settings is not None:
+            self.apply_gurobi_settings(self.gurobi_settings)
+
+        self.preprocess_input()
+        self.create_empty_capacity_constraints()
+        self.create_empty_request_embedding_bound_constraints()
+        self.create_empty_objective()
+
+        self.model.update()
+
+        self.time_preprocess = time.time() - time_preprocess_start
+
+    def preprocess_input(self):
+
+        if len(self.substrate.get_types()) > 1:
+            raise ValueError("Can only handle a single node type.")
+
+        self.node_type = list(self.substrate.get_types())[0]
+        self.snodes = self.substrate.nodes
+        self.sedges = self.substrate.edges
+
+        self.node_capacities = {snode : self.substrate.get_node_type_capacity(snode, self.node_type) for snode in self.snodes}
+        self.edge_capacities = {sedge : self.substrate.get_edge_capacity(sedge) for sedge in self.sedges}
+
+        self.dual_costs_requests  = {req : 0 for req in self.requests}
+        self.dual_costs_node_resources = {snode: 1 for snode in self.snodes}
+        self.dual_costs_edge_resources = {sedge: 1 for sedge in self.sedges}
+
+        self.tree_decomp_computation_times = {req : 0 for req in self.requests}
+        self.tree_decomps = {req : None for req in self.requests}
+        for req in self.requests:
+            self.logger.debug("Computing tree decomposition for request {}".format(req))
+            td_computation_time = time.time()
+            td_comp = TreeDecompositionComputation(req)
+            tree_decomp = td_comp.compute_tree_decomposition()
+            sntd = SmallSemiNiceTDArb(tree_decomp, req)
+            self.tree_decomps[req] = sntd
+            self.tree_decomp_computation_times[req] = time.time() - td_computation_time
+            self.logger.debug("\tdone.".format(req))
+
+        self.dynvmp_instances = {req : None for req in self.requests}
+        self.dynvmp_runtimes_initialization = {req: list() for req in self.requests}
+
+        for req in self.requests:
+            self.logger.debug("Initializing DynVMP Instance for request {}".format(req))
+            dynvmp_init_time = time.time()
+            opt_dynvmp = OptimizedDynVMP(self.substrate,
+                                         req,
+                                         self.tree_decomps[req],
+                                         initial_snode_costs=self.dual_costs_node_resources,
+                                         initial_sedge_costs=self.dual_costs_edge_resources)
+            opt_dynvmp.initialize_data_structures()
+            self.dynvmp_runtimes_initialization[req].append(time.time()-dynvmp_init_time)
+            self.dynvmp_instances[req] = opt_dynvmp
+            self.logger.debug("\tdone.".format(req))
+
+        self.mappings_of_requests = {req: list() for req in self.requests}
+        self.allocations_of_mappings = {req: list() for req in self.requests}
+        self.dynvmp_runtimes_computation = {req: list() for req in self.requests}
+        self.gurobi_runtimes = []
+
+        self.mapping_variables = {req: list() for req in self.requests}
+
+        self.substrate_resources = list(self.scenario.substrate.edges)
+        self.substrate_edge_resources = list(self.scenario.substrate.edges)
+        self.substrate_node_resources = []
+        for ntype in self.scenario.substrate.get_types():
+            for snode in self.scenario.substrate.get_nodes_by_type(ntype):
+                self.substrate_node_resources.append((ntype, snode))
+                self.substrate_resources.append((ntype, snode))
+        self.adapted_variables = list()
+
+
+    def create_empty_capacity_constraints(self):
+        self.capacity_constraints = {}
+        for snode in self.snodes:
+            self.capacity_constraints[snode] = self.model.addConstr(0, GRB.LESS_EQUAL, self.node_capacities[snode], name="capacity_node_{}".format(snode))
+        for sedge in self.sedges:
+            self.capacity_constraints[sedge] = self.model.addConstr(0, GRB.LESS_EQUAL, self.edge_capacities[sedge], name="capacity_edge_{}".format(sedge))
+
+    def create_empty_request_embedding_bound_constraints(self):
+        self.embedding_bound = {req : None for req in self.requests}
+        for req in self.requests:
+            self.embedding_bound[req] = self.model.addConstr(0, GRB.LESS_EQUAL, 1)
+
+    def create_empty_objective(self):
+        self.model.setObjective(0, GRB.MAXIMIZE)
+
+
+
+    def introduce_new_columns(self, req, maximum_number_of_columns_to_introduce=None, cutoff=INFINITY):
+        dynvmp_instance = self.dynvmp_instances[req]
+        opt_cost = dynvmp_instance.get_optimal_solution_cost()
+        current_new_allocations = []
+        current_new_variables = []
+        self.logger.debug("Objective when introucding new columns was {}".format(opt_cost))
+        (costs, indices) = dynvmp_instance.get_ordered_root_solution_costs_and_mapping_indices(maximum_number_of_solutions_to_return=maximum_number_of_columns_to_introduce)
+        mapping_list = dynvmp_instance.recover_list_of_mappings(indices)
+        self.logger.debug("Will iterate mapping list {}".format(req.name))
+        for index, mapping in enumerate(mapping_list):
+            if costs[index] > cutoff:
+                break
+            #store mapping
+            varname = "f_req[{}]_k[{}]".format(req.name, index+len(self.mappings_of_requests[req]))
+            new_var = self.model.addVar(lb=0.0,
+                                        ub=1.0,
+                                        obj=req.profit,
+                                        vtype=GRB.CONTINUOUS,
+                                        name=varname)
+            current_new_variables.append(new_var)
+
+            #compute corresponding substrate allocation and store it
+            mapping_allocations = self._compute_allocations(req, mapping)
+            current_new_allocations.append(mapping_allocations)
+
+        #make variables accessible
+        self.model.update()
+        for index, new_var in enumerate(current_new_variables):
+            #handle allocations
+            corresponding_allocation = current_new_allocations[index]
+            for sres, alloc in corresponding_allocation.iteritems():
+                if sres not in self.capacity_constraints.keys():
+                    continue
+                constr = self.capacity_constraints[sres]
+                self.model.chgCoeff(constr, new_var, alloc)
+
+            self.model.chgCoeff(self.embedding_bound[req], new_var, 1.0)
+
+        self.mappings_of_requests[req].extend(mapping_list[:len(current_new_variables)])
+        self.allocations_of_mappings[req].extend(current_new_allocations[:len(current_new_variables)])
+        self.mapping_variables[req].extend(current_new_variables)
+        self.logger.debug("Introduced {} new mappings for {}".format(len(current_new_variables), req.name))
+
+
+    def _compute_allocations(self, req, mapping):
+        allocations = {}
+        for reqnode in req.nodes:
+            snode = mapping.mapping_nodes[reqnode]
+            if snode in allocations:
+                allocations[snode] += req.node[reqnode]['demand']
+            else:
+                allocations[snode] = req.node[reqnode]['demand']
+            reqnode_type = req.get_type(reqnode)
+            res_id = (reqnode_type, snode)
+            if res_id in allocations:
+                allocations[res_id] += req.node[reqnode]['demand']
+            else:
+                allocations[res_id] = req.node[reqnode]['demand']
+        for reqedge in req.edges:
+            path = mapping.mapping_edges[reqedge]
+            for sedge in path:
+                stail, shead = sedge
+                if sedge in allocations:
+                    allocations[sedge] += req.edge[reqedge]['demand']
+                else:
+                    allocations[sedge] = req.edge[reqedge]['demand']
+        return allocations
+
+    def perform_separation_and_introduce_new_columns(self, ignore_requests=[]):
+        new_columns_generated = False
+
+        for req in self.requests:
+            if req in ignore_requests:
+                continue
+            # execute algorithm
+            dynvmp_instance = self.dynvmp_instances[req]
+            single_dynvmp_runtime = time.time()
+            dynvmp_instance.compute_solution()
+            self.dynvmp_runtimes_computation[req].append(time.time() - single_dynvmp_runtime)
+            opt_cost = dynvmp_instance.get_optimal_solution_cost()
+            if opt_cost is not None and opt_cost < 0.995*(req.profit - self.dual_costs_requests[req]):
+                self.introduce_new_columns(req, maximum_number_of_columns_to_introduce=5, cutoff = req.profit-self.dual_costs_requests[req])
+                new_columns_generated = True
+
+        return new_columns_generated
+
+    def update_dual_costs_and_reinit_dynvmps(self):
+        #update dual costs
+        for snode in self.snodes:
+            self.dual_costs_node_resources[snode] = self.capacity_constraints[snode].Pi
+        for sedge in self.sedges:
+            self.dual_costs_edge_resources[sedge] = self.capacity_constraints[sedge].Pi
+        for req in self.requests:
+            self.dual_costs_requests[req] = self.embedding_bound[req].Pi
+
+        #reinit dynvmps
+        for req in self.requests:
+            dynvmp_instance = self.dynvmp_instances[req]
+            single_dynvmp_reinit_time = time.time()
+            dynvmp_instance.reinitialize(new_node_costs=self.dual_costs_node_resources,
+                                         new_edge_costs=self.dual_costs_edge_resources)
+            self.dynvmp_runtimes_initialization[req].append(time.time() - single_dynvmp_reinit_time)
+
+    def compute_integral_solution(self):
+        #the name sucks, but we sadly need it for the framework
+        return self.compute_solution()
+
+
+    def compute_solution(self):
+        ''' Abstract function computing an integral solution to the model (generated before).
+
+        :return: Result of the optimization consisting of an instance of the GurobiStatus together with a result
+                 detailing the solution computed by Gurobi.
+        '''
+        self.logger.info("Starting computing solution")
+        # do the optimization
+        time_optimization_start = time.time()
+
+        #do the magic here
+
+        for req in self.requests:
+            self.logger.debug("Getting first mappings for request {}".format(req.name))
+            # execute algorithm
+            dynvmp_instance = self.dynvmp_instances[req]
+            single_dynvmp_runtime = time.time()
+            dynvmp_instance.compute_solution()
+            self.dynvmp_runtimes_computation[req].append(time.time() - single_dynvmp_runtime)
+            opt_cost = dynvmp_instance.get_optimal_solution_cost()
+            if opt_cost is not None:
+                self.logger.debug("Introducing new columns for {}".format(req.name))
+                self.introduce_new_columns(req, maximum_number_of_columns_to_introduce=100)
+
+        self.model.update()
+
+        new_columns_generated = True
+        counter = 0
+        last_obj = -1
+        current_obj = 0
+        #the abortion criterion here is not perfect and should probably depend on the relative error instead of the
+        #absolute one.
+        while new_columns_generated and abs(current_obj-last_obj) > 0.0001:
+            gurobi_runtime = time.time()
+            self.model.optimize()
+            last_obj = current_obj
+            current_obj = self.model.getAttr("ObjVal")
+            self.gurobi_runtimes.append(time.time() - gurobi_runtime)
+            self.update_dual_costs_and_reinit_dynvmps()
+
+            new_columns_generated = self.perform_separation_and_introduce_new_columns()
+
+            counter += 1
+
+
+        self.time_optimization = time.time() - time_optimization_start
+
+        # do the postprocessing
+        self._time_postprocess_start = time.time()
+        self.status = self.model.getAttr("Status")
+        objVal = None
+        objBound = GRB.INFINITY
+        objGap = GRB.INFINITY
+        solutionCount = self.model.getAttr("SolCount")
+
+        if solutionCount > 0:
+            objVal = self.model.getAttr("ObjVal")
+
+        self.status = modelcreator.GurobiStatus(status=self.status,
+                                                solCount=solutionCount,
+                                                objValue=objVal,
+                                                objGap=objGap,
+                                                objBound=objBound,
+                                                integralSolution=False)
+
+
+        best_solution = self.round_solution_without_violations(10)
+
+
+        self.logger.info("Best solution by rounding is {}".format(best_solution))
+
+        anonymous_decomp_runtimes = []
+        anonymous_init_runtimes = []
+        anonymous_computation_runtimes = []
+        for req in (self.requests):
+            anonymous_decomp_runtimes.append(self.tree_decomp_computation_times[req])
+            anonymous_init_runtimes.append(self.dynvmp_runtimes_initialization[req])
+            anonymous_computation_runtimes.append(self.dynvmp_runtimes_computation[req])
+
+        self.result = SeparationLPSolution(self.time_preprocess,
+                                           self.time_optimization,
+                                           0,
+                                           anonymous_decomp_runtimes,
+                                           anonymous_init_runtimes,
+                                           anonymous_computation_runtimes,
+                                           self.gurobi_runtimes,
+                                           self.status,
+                                           objVal)
+
+        return self.result
+
+
+
+
+    def remove_impossible_mappings_and_reoptimize(self, currently_fixed_allocations, fixed_requests):
+        self.logger.debug("Removing impossible columns..")
+        for req in self.requests:
+            if req in fixed_requests:
+                continue
+            for mapping_index, mapping in enumerate(self.mappings_of_requests[req]):
+                if not self.check_whether_mapping_would_obey_resource_violations(currently_fixed_allocations, self.allocations_of_mappings[req][mapping_index]):
+                    self.mapping_variables[req][mapping_index].ub = 0.0
+                    self.adapted_variables.append(self.mapping_variables[req][mapping_index])
+
+
+        self.logger.debug("Re-compute after removal of stupid mappings...")
+
+        self.model.update()
+        self.model.optimize()
+        #
+        # self.update_dual_costs_and_reinit_dynvmps()
+        # if self.perform_separation_and_introduce_new_columns(ignore_requests=fixed_requests):
+        #     self.logger.debug("Separation yielded new mappings. Reoptimizing!")
+        #     self.model.update()
+        #     self.model.optimize()
+        #
+        # self.logger.debug("Removing impossible columns..")
+        # for req in self.requests:
+        #     if req in fixed_requests:
+        #         continue
+        #     for mapping_index, mapping in enumerate(self.mappings_of_requests[req]):
+        #         if not self.check_whether_mapping_would_obey_resource_violations(currently_fixed_allocations, self.allocations_of_mappings[req][mapping_index]):
+        #             self.mapping_variables[req][mapping_index].ub = 0.0
+        #             self.adapted_variables.append(self.mapping_variables[req][mapping_index])
+        #
+        #
+        # self.logger.debug("Re-compute after removal of stupid mappings...")
+        #
+        # self.model.update()
+        # self.model.optimize()
+
+
+
+
+    def round_solution_without_violations(self, number_of_samples):
+
+        best_solution_tuple = None
+
+        L = {}
+
+        for q in xrange(number_of_samples):
+            time_rr0 = time.clock()
+
+            profit, max_node_load, max_edge_load = self.rounding_iteration_violations_without_violations(L)
+
+            time_rr = time.clock() - time_rr0
+
+            solution_tuple = rrt.RandomizedRoundingSolutionData(profit=profit,
+                                                                max_node_load=max_node_load,
+                                                                max_edge_load=max_edge_load,
+                                                                time_to_round_solution=time_rr)
+
+            if best_solution_tuple is None or best_solution_tuple.profit < solution_tuple.profit:
+                best_solution_tuple = solution_tuple
+
+        return best_solution_tuple
+
+    def _initialize_load_dict(self, L):
+        sub = self.scenario.substrate
+        for snode in sub.nodes:
+            for ntype in sub.node[snode]["capacity"]:
+                L[(ntype, snode)] = 0.0
+        for u, v in sub.edges:
+            L[(u, v)] = 0.0
+
+    def rounding_iteration_violations_without_violations(self, L):
+        r_prime = list()
+        B = 0.0
+        self._initialize_load_dict(L)
+
+        do_rand = False
+        if do_rand:
+            req_list = list(self.scenario.requests)
+            random.shuffle(req_list)
+        else:
+            req_list = list(sorted(self.scenario.requests, key=lambda r: r.profit, reverse=True))
+
+        if len(self.adapted_variables) > 0:
+            for var in self.adapted_variables:
+                var.lb = 0.0
+                var.ub = 1.0
+
+        for req in req_list:
+
+            self.remove_impossible_mappings_and_reoptimize(L, fixed_requests=r_prime)
+
+            p = random.random()
+            total_flow = 0.0
+
+            chosen_mapping = None
+
+            for mapping_index, mapping in enumerate(self.mappings_of_requests[req]):
+                if req.profit < 0.0001:
+                    continue
+                total_flow += self.mapping_variables[req][mapping_index].X
+                if p < total_flow:
+                    chosen_mapping = (mapping_index, mapping)
+                    break
+
+            if chosen_mapping is not None:
+
+                if self.check_whether_mapping_would_obey_resource_violations(L, self.allocations_of_mappings[req][chosen_mapping[0]]):
+                    B += req.profit
+                    for res in self.substrate_resources:
+                        if res in self.allocations_of_mappings[req][chosen_mapping[0]].keys():
+                            L[res] += self.allocations_of_mappings[req][chosen_mapping[0]][res]
+                    self.mapping_variables[req][chosen_mapping[0]].lb = 1.0
+                    self.adapted_variables.append(self.mapping_variables[req][chosen_mapping[0]])
+            else:
+                for var in self.mapping_variables[req]:
+                    var.ub = 0
+                    self.adapted_variables.append(var)
+
+
+            r_prime.append(req)
+
+
+        max_node_load, max_edge_load = self.calc_max_loads(L)
+        return B, max_node_load, max_edge_load
+
+
+    def calc_max_loads(self, L):
+        max_node_load = 0
+        max_edge_load = 0
+        for (ntype, snode) in self.substrate_node_resources:
+            ratio = L[(ntype, snode)] / float(self.scenario.substrate.node[snode]["capacity"][ntype])
+            if ratio > max_node_load:
+                max_node_load = ratio
+        for (u, v) in self.substrate_edge_resources:
+            ratio = L[(u, v)] / float(self.scenario.substrate.edge[(u, v)]["capacity"])
+            if ratio > max_edge_load:
+                max_edge_load = ratio
+        return (max_node_load, max_edge_load)
+
+    def check_whether_mapping_would_obey_resource_violations(self, L, mapping_loads):
+        result = True
+
+        for (ntype, snode) in self.substrate_node_resources:
+            if (ntype, snode) not in mapping_loads:
+                continue
+            if L[(ntype, snode)] + mapping_loads[(ntype, snode)] > self.scenario.substrate.node[snode]["capacity"][ntype]:
+                result = False
+                break
+
+        for (u, v) in self.substrate_edge_resources:
+            if (u,v) not in mapping_loads:
+                continue
+            if L[(u, v)] + mapping_loads[(u, v)] > self.scenario.substrate.edge[(u, v)]["capacity"]:
+                result = False
+                break
+
+        return result
 
     def recover_solution_from_variables(self):
         pass
