@@ -560,9 +560,10 @@ class ViNESingleScenario(object):
             logger=self.logger,
             optimization_callback=None
         )
-        sub_mc.lp_output_file = single_req_scenario.name  + ".lp"
+        #sub_mc.lp_output_file = single_req_scenario.name  + ".lp"
         sub_mc._disable_temporal_information_output = True
         sub_mc.init_model_creator()
+        sub_mc.model.setParam("LogFile", "")
         if fixed_node_mappings_dict is not None:
             sub_mc.create_constraints_fix_node_mappings(self._current_request, fixed_node_mappings_dict)
         lp_variable_assignment = sub_mc.compute_fractional_solution()
