@@ -14,9 +14,10 @@ def test_single_request_embeddings_shortest_path_method(lp_objective, test_case)
 
     scenario = vtd.get_test_scenario(test_data)
 
-    v = vine.WiNESingleWindow(scenario,
-                              edge_mapping_method=vine.EdgeMappingMethod.SHORTEST_PATH,
-                              lp_objective=lp_objective)
+    v = vine.OfflineViNEAlgorithm(scenario,
+                                  edge_embedding_model=vine.ViNEEdgeEmbeddingModel.UNSPLITTABLE,
+                                  lp_objective=lp_objective,
+                                  rounding_procedure=vine.ViNERoundingProcedure.DETERMINISTIC)
     result = v.compute_integral_solution()
     solution = result.get_solution()
     req, m = next(solution.request_mapping.iteritems())  # there should only be one...
@@ -33,7 +34,7 @@ def test_single_request_embeddings_shortest_path_method(lp_objective, test_case)
 @pytest.mark.parametrize("lp_objective", list(vine.ViNELPObjective))
 @pytest.mark.parametrize("test_case", vtd.SPLITTABLE_TEST_CASES)
 def test_single_request_embeddings_splittable_path_method(lp_objective, test_case):
-    if (lp_objective in [vine.ViNELPObjective.LB_IGNORE_COSTS, vine.ViNELPObjective.NO_LB_IGNORE_COSTS]
+    if (lp_objective in [vine.ViNELPObjective.ViNE_LB_DEF, vine.ViNELPObjective.ViNE_COSTS_DEF]
             and test_case in vtd.COST_SPECIFIC_TEST_CASES):
         # Skip tests that require costs to enforce a unique mapping
         return
@@ -42,9 +43,11 @@ def test_single_request_embeddings_splittable_path_method(lp_objective, test_cas
 
     scenario = vtd.get_test_scenario(test_data)
 
-    v = vine.WiNESingleWindow(scenario,
-                              edge_mapping_method=vine.EdgeMappingMethod.SPLITTABLE,
-                              lp_objective=lp_objective)
+    v = vine.OfflineViNEAlgorithm(scenario,
+                                  edge_embedding_model=vine.ViNEEdgeEmbeddingModel.SPLITTABLE,
+                                  lp_objective=lp_objective,
+                                  rounding_procedure=vine.ViNERoundingProcedure.DETERMINISTIC
+                                  )
     result = v.compute_integral_solution()
     solution = result.get_solution()
     req, m = next(solution.request_mapping.iteritems())  # there should only be one...
@@ -63,7 +66,10 @@ def test_single_request_rejected_embeddings(test_case):
     test_data = vtd.SINGLE_REQUEST_REJECT_EMBEDDING_TEST_CASES[test_case]
     scenario = vtd.get_test_scenario(test_data)
 
-    v = vine.WiNESingleWindow(scenario)
+    v = vine.OfflineViNEAlgorithm(scenario,
+                                  edge_embedding_model=vine.ViNEEdgeEmbeddingModel.UNSPLITTABLE,
+                                  lp_objective=vine.ViNELPObjective.ViNE_COSTS_DEF,
+                                  rounding_procedure=vine.ViNERoundingProcedure.DETERMINISTIC)
 
     result = v.compute_integral_solution()
     solution = result.get_solution()
@@ -90,7 +96,11 @@ def test_only_one_request_is_embedded_due_to_capacity_limitations():
         objective=datamodel.Objective.MAX_PROFIT,
     )
 
-    v = vine.WiNESingleWindow(scenario)
+    v = vine.OfflineViNEAlgorithm(scenario,
+                                  edge_embedding_model=vine.ViNEEdgeEmbeddingModel.UNSPLITTABLE,
+                                  lp_objective=vine.ViNELPObjective.ViNE_COSTS_DEF,
+                                  rounding_procedure=vine.ViNERoundingProcedure.DETERMINISTIC
+                                  )
     result = v.compute_integral_solution()
     solution = result.get_solution()
     m1 = solution.request_mapping[req1]
@@ -121,7 +131,11 @@ def test_requests_are_processed_in_profit_order():
         objective=datamodel.Objective.MAX_PROFIT,
     )
 
-    v = vine.WiNESingleWindow(scenario)
+    v = vine.OfflineViNEAlgorithm(scenario,
+                                  edge_embedding_model=vine.ViNEEdgeEmbeddingModel.UNSPLITTABLE,
+                                  lp_objective=vine.ViNELPObjective.ViNE_COSTS_DEF,
+                                  rounding_procedure=vine.ViNERoundingProcedure.DETERMINISTIC
+                                  )
     result = v.compute_integral_solution()
     solution = result.get_solution()
     m = solution.request_mapping[req2]
@@ -145,7 +159,11 @@ def test_cleanup_references():
         substrate=sub,
         objective=datamodel.Objective.MAX_PROFIT,
     )
-    v = vine.WiNESingleWindow(scenario)
+    v = vine.OfflineViNEAlgorithm(scenario,
+                                  edge_embedding_model=vine.ViNEEdgeEmbeddingModel.UNSPLITTABLE,
+                                  lp_objective=vine.ViNELPObjective.ViNE_COSTS_DEF,
+                                  rounding_procedure=vine.ViNERoundingProcedure.DETERMINISTIC
+                                  )
     result = v.compute_integral_solution()
 
     scenario_copy = copy.deepcopy(scenario)
