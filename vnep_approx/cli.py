@@ -81,10 +81,9 @@ def start_experiment(experiment_yaml,
     )
 
 
-
     run_experiment.register_algorithm(
-        treewidth_model.RandRoundSepLPOptDynVMP.ALGORITHM_ID,
-        treewidth_model.RandRoundSepLPOptDynVMP
+        treewidth_model.RandRoundSepLPOptDynVMPCollection.ALGORITHM_ID,
+        treewidth_model.RandRoundSepLPOptDynVMPCollection
     )
 
     run_experiment.run_experiment(

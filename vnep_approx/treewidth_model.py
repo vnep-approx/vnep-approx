@@ -29,6 +29,8 @@ import numpy as np
 import random
 import time
 from heapq import heappush, heappop
+import enum
+from collections import namedtuple
 
 
 import gurobipy
@@ -1388,6 +1390,7 @@ class SeparationLP_OptDynVMP(object):
         Allows the computation of LP solutions using OptDynVMP as a separation oracle.
         Currently, this is only implemented for the Max Profit Objective, but the min cost objective should be easy to
         handle as well.
+        
     '''
 
     def __init__(self,
@@ -1824,10 +1827,106 @@ class SeparationLP_OptDynVMP(object):
             self.model.getParam(param)
 
 
+class RoundingOrder(enum.Enum):
+    RANDOM = "RAND"
+    STATIC_REQ_PROFIT = "STATIC_REQ_PROFIT"
+    ACHIEVED_REQ_PROFIT = "ACHIEVED_REQ_PROFIT"
 
 
-class RandRoundSepLPOptDynVMP(object):
-    ALGORITHM_ID = "RandRoundSepLPOptDynVMP"
+class LPRecomputationMode(enum.Enum):
+    NONE = "NONE"
+    RECOMPUTATION_WITHOUT_SEPARATION =     "RECOMPUTATION_WITHOUT_SEPARATION"
+    RECOMPUTATION_WITH_SINGLE_SEPARATION = "RECOMPUTATION_WITH_SINGLE_SEPARATION"
+
+
+RandomizedRoundingSolution = namedtuple("RandomizedRoundingSolution", ["solution",
+                                                                       "profit",
+                                                                       "max_node_load",
+                                                                       "max_edge_load",
+                                                                       "time_to_round_solution"])
+
+
+
+
+class RandRoundSepLPOptDynVMPCollectionResult(modelcreator.AlgorithmResult):
+
+    def __init__(self, scenario, lp_computation_information):
+        self.scenario = scenario
+        self.lp_computation_information = lp_computation_information
+        self.solutions = {}
+
+    def add_solution(self, rounding_order, lp_recomputation_mode, solution):
+        identifier = (lp_recomputation_mode, rounding_order)
+        if identifier not in self.solutions.keys():
+            self.solutions[identifier] = []
+        solution_index = len(self.solutions[identifier])
+        self.solutions[identifier].append(solution)
+
+
+    def get_solution(self):
+        return self.solutions
+
+    def _check_scenarios_are_equal(self, original_scenario):
+        #check can only work if a single solution is returned; we incorporate this in the following function: _cleanup_references_raw
+        pass
+
+
+    def _cleanup_references_raw(self, original_scenario):
+        for identifier in self.solutions.keys():
+            #search for best solution and remove mapping information of all other solutions
+            list_of_solutions = self.solutions[identifier]
+            best_solution = max(list_of_solutions, key= lambda x: x.profit)
+            new_list_of_solutions = []
+
+            for solution in list_of_solutions:
+                if solution == best_solution:
+                    new_list_of_solutions.append(self._actual_cleanup_of_references_raw(original_scenario, solution))
+                else:
+                    new_list_of_solutions.append(RandomizedRoundingSolution(solution=None,
+                                                                            profit=solution.profit,
+                                                                            max_node_load=solution.max_node_load,
+                                                                            max_edge_load=solution.max_edge_load,
+                                                                            time_to_round_solution=solution.time_to_round_solution))
+
+            self.solutions[identifier] = new_list_of_solutions
+
+
+        #lastly: adapt the collection's scenario
+        self.scenario = original_scenario
+
+    def _actual_cleanup_of_references_raw(self, original_scenario, rr_solution):
+        for own_req, original_request in zip(self.scenario.requests, original_scenario.requests):
+            assert own_req.nodes == original_request.nodes
+            assert own_req.edges == original_request.edges
+            assert own_req.name == original_request.name
+
+            if own_req in rr_solution.solution.request_mapping:
+                mapping = rr_solution.solution.request_mapping[own_req]
+
+                del rr_solution.solution.request_mapping[own_req]
+                if mapping is not None:
+                    mapping.request = original_request
+                    mapping.substrate = original_scenario.substrate
+                rr_solution.solution.request_mapping[original_request] = mapping
+
+        rr_solution.solution.scenario = original_scenario
+        return rr_solution
+
+
+
+    def _get_solution_overview(self):
+        result = "\n\t{:^10s} | {:^40s} {:^20s} | {:^8s}\n".format("PROFIT", "LP Recomputation Mode", "Rounding Order", "INDEX")
+        for identifier in self.solutions.keys():
+            for solution_index, solution in enumerate(self.solutions[identifier]):
+                result += "\t" + "{:^10.5f} | {:^40s} {:^20s} | {:<8d}\n".format(solution.profit,
+                                                                                 identifier[0].value,
+                                                                                 identifier[1].value,
+                                                                                 solution_index)
+        return result
+
+
+class RandRoundSepLPOptDynVMPCollection(object):
+    ALGORITHM_ID = "RandRoundSepLPOptDynVMPCollection"
 
     '''
         Allows the computation of LP solutions using OptDynVMP as a separation oracle.
@@ -1837,12 +1936,43 @@ class RandRoundSepLPOptDynVMP(object):
 
     def __init__(self,
                  scenario,
+                 rounding_order_list,
+                 lp_recomputation_mode_list,
+                 lp_relative_quality,
+                 rounding_samples_per_lp_recomputation_mode,
+                 number_initial_mappings_to_compute,
+                 number_further_mappings_to_add,
                  gurobi_settings=None,
                  logger=None):
         self.scenario = scenario
         self.substrate = self.scenario.substrate
         self.requests = self.scenario.requests
         self.objective = self.scenario.objective
+
+        self.rounding_order_list = []
+        self.lp_recomputation_list = []
+        self.lp_relative_quality = lp_relative_quality
+        self.rounding_samples_per_lp_recomputation_mode = dict()
+        for lp_recomputation_str, number_of_samples in rounding_samples_per_lp_recomputation_mode:
+            self.rounding_samples_per_lp_recomputation_mode[LPRecomputationMode(lp_recomputation_str)] = number_of_samples
+        self.number_initial_mappings_to_compute = number_initial_mappings_to_compute
+        self.number_further_mappings_to_add = number_further_mappings_to_add
+
+        for rounding_order in rounding_order_list:
+            if isinstance(rounding_order, str):
+                self.rounding_order_list.append(RoundingOrder(rounding_order))
+            elif isinstance(rounding_order, RoundingOrder):
+                self.rounding_order_list.append(rounding_order)
+            else:
+                raise ValueError("Cannot handle this rounding order.")
+
+        for lp_recomputation_mode in lp_recomputation_mode_list:
+            if isinstance(lp_recomputation_mode, str):
+                self.lp_recomputation_list.append(LPRecomputationMode(lp_recomputation_mode))
+            elif isinstance(lp_recomputation_mode, LPRecomputationMode):
+                self.lp_recomputation_list.append(lp_recomputation_mode)
+            else:
+                raise ValueError("Cannot handle this LP recomputation mode.")
 
         if self.objective == datamodel.Objective.MAX_PROFIT:
             pass
@@ -1892,6 +2022,8 @@ class RandRoundSepLPOptDynVMP(object):
         self.create_empty_objective()
 
         self.model.update()
+
+        self.warmstart_lp_basis = {"V": list(), "C": list()}
 
         self.time_preprocess = time.time() - time_preprocess_start
 
@@ -2041,8 +2173,10 @@ class RandRoundSepLPOptDynVMP(object):
                     allocations[sedge] = req.edge[reqedge]['demand']
         return allocations
 
-    def perform_separation_and_introduce_new_columns(self, ignore_requests=[]):
+    def perform_separation_and_introduce_new_columns(self, current_objective, ignore_requests=[]):
         new_columns_generated = False
+
+        total_dual_violations = 0
 
         for req in self.requests:
             if req in ignore_requests:
@@ -2053,11 +2187,41 @@ class RandRoundSepLPOptDynVMP(object):
             dynvmp_instance.compute_solution()
             self.dynvmp_runtimes_computation[req].append(time.time() - single_dynvmp_runtime)
             opt_cost = dynvmp_instance.get_optimal_solution_cost()
-            if opt_cost is not None and opt_cost < 0.995*(req.profit - self.dual_costs_requests[req]):
-                self.introduce_new_columns(req, maximum_number_of_columns_to_introduce=5, cutoff = req.profit-self.dual_costs_requests[req])
-                new_columns_generated = True
+            if opt_cost is not None:
+                dual_violation_of_req = (opt_cost - req.profit + self.dual_costs_requests[req])
+                if dual_violation_of_req < 0:
+                    total_dual_violations += (-dual_violation_of_req)
 
-        return new_columns_generated
+        self._current_obj_bound = current_objective + total_dual_violations
+
+        self._current_solution_quality = None
+        if abs(current_objective) > 0.00001:
+            self._current_solution_quality = total_dual_violations / current_objective
+        else:
+            self.logger.info("WARNING: Current objective is very close to zero; treating it as such.")
+            self._current_solution_quality = total_dual_violations
+
+        self.logger.info("\nCurrent LP solution value is {:10.5f}\n"
+                           "Current dual upper bound is  {:10.5f}\n"
+                         "Accordingly, current solution is at least {}-optimal".format(current_objective, current_objective+total_dual_violations, 1+self._current_solution_quality))
+
+        if self._current_solution_quality < self.lp_relative_quality:
+            self.logger.info("Ending LP computation as found solution is {}-near optimal, which lies below threshold of {}".format(self._current_solution_quality, self.lp_relative_quality))
+            return False
+        else:
+
+            for req in self.requests:
+                if req in ignore_requests:
+                    continue
+                dynvmp_instance = self.dynvmp_instances[req]
+                opt_cost = dynvmp_instance.get_optimal_solution_cost()
+                if opt_cost is not None and opt_cost < 0.999*(req.profit - self.dual_costs_requests[req]):
+                    self.introduce_new_columns(req,
+                                               maximum_number_of_columns_to_introduce=self.number_further_mappings_to_add,
+                                               cutoff = req.profit-self.dual_costs_requests[req])
+                    new_columns_generated = True
+
+            return new_columns_generated
 
     def update_dual_costs_and_reinit_dynvmps(self):
         #update dual costs
@@ -2079,6 +2243,27 @@ class RandRoundSepLPOptDynVMP(object):
     def compute_integral_solution(self):
         #the name sucks, but we sadly need it for the framework
         return self.compute_solution()
+
+
+
+    def _save_warmstart_lp_basis(self):
+        if len(self.warmstart_lp_basis["V"]) > 0 or len(self.warmstart_lp_basis["C"]) > 0:
+            self.logger.info("ERROR: Actually, the warmstart basis should only be set once!")
+            self.warmstart_lp_basis["V"] = list
+            self.warmstart_lp_basis["C"] = list
+        for var in self.model.getVars():
+            self.warmstart_lp_basis["V"].append((var, var.VBasis))
+        for constr in self.model.getConstrs():
+            self.warmstart_lp_basis["C"].append((constr, constr.CBasis))
+        self.logger.info(
+            "Successfully stored warmstart LP Basis.")
+
+    def _load_warmstart_lp_basis(self):
+        for var, value in self.warmstart_lp_basis["V"]:
+            var.VBasis = value
+        for constr, value in self.warmstart_lp_basis["C"]:
+            constr.CBasis = value
+        self.logger.info("Successfully loaded warmstart LP Basis (whether this basis is used in the following is indicated by the log of gurobi).")
 
 
     def compute_solution(self):
@@ -2103,7 +2288,8 @@ class RandRoundSepLPOptDynVMP(object):
             opt_cost = dynvmp_instance.get_optimal_solution_cost()
             if opt_cost is not None:
                 self.logger.debug("Introducing new columns for {}".format(req.name))
-                self.introduce_new_columns(req, maximum_number_of_columns_to_introduce=100)
+                self.introduce_new_columns(req,
+                                           maximum_number_of_columns_to_introduce=self.number_initial_mappings_to_compute)
 
         self.model.update()
 
@@ -2113,7 +2299,7 @@ class RandRoundSepLPOptDynVMP(object):
         current_obj = 0
         #the abortion criterion here is not perfect and should probably depend on the relative error instead of the
         #absolute one.
-        while new_columns_generated and abs(current_obj-last_obj) > 0.0001:
+        while new_columns_generated:
             gurobi_runtime = time.time()
             self.model.optimize()
             last_obj = current_obj
@@ -2121,7 +2307,7 @@ class RandRoundSepLPOptDynVMP(object):
             self.gurobi_runtimes.append(time.time() - gurobi_runtime)
             self.update_dual_costs_and_reinit_dynvmps()
 
-            new_columns_generated = self.perform_separation_and_introduce_new_columns()
+            new_columns_generated = self.perform_separation_and_introduce_new_columns(current_objective=current_obj)
 
             counter += 1
 
@@ -2132,8 +2318,8 @@ class RandRoundSepLPOptDynVMP(object):
         self._time_postprocess_start = time.time()
         self.status = self.model.getAttr("Status")
         objVal = None
-        objBound = GRB.INFINITY
-        objGap = GRB.INFINITY
+        objBound = self._current_obj_bound
+        objGap = self._current_solution_quality
         solutionCount = self.model.getAttr("SolCount")
 
         if solutionCount > 0:
@@ -2147,10 +2333,8 @@ class RandRoundSepLPOptDynVMP(object):
                                                 integralSolution=False)
 
 
-        best_solution = self.round_solution_without_violations(10)
 
-
-        self.logger.info("Best solution by rounding is {}".format(best_solution))
+        self._save_warmstart_lp_basis()
 
         anonymous_decomp_runtimes = []
         anonymous_init_runtimes = []
@@ -2160,23 +2344,30 @@ class RandRoundSepLPOptDynVMP(object):
             anonymous_init_runtimes.append(self.dynvmp_runtimes_initialization[req])
             anonymous_computation_runtimes.append(self.dynvmp_runtimes_computation[req])
 
-        self.result = SeparationLPSolution(self.time_preprocess,
-                                           self.time_optimization,
-                                           0,
-                                           anonymous_decomp_runtimes,
-                                           anonymous_init_runtimes,
-                                           anonymous_computation_runtimes,
-                                           self.gurobi_runtimes,
-                                           self.status,
-                                           objVal)
+
+        sep_lp_solution = SeparationLPSolution(self.time_preprocess,
+                                               self.time_optimization,
+                                               0,
+                                               anonymous_decomp_runtimes,
+                                               anonymous_init_runtimes,
+                                               anonymous_computation_runtimes,
+                                               self.gurobi_runtimes,
+                                               self.status,
+                                               objVal)
+
+        self.result = RandRoundSepLPOptDynVMPCollectionResult(scenario=self.scenario,
+                                                              lp_computation_information=sep_lp_solution)
+
+        best_solution = self.perform_rounding()
+        self.logger.info("Best solution by rounding is {}".format(best_solution))
 
         return self.result
 
 
 
 
-    def remove_impossible_mappings_and_reoptimize(self, currently_fixed_allocations, fixed_requests):
-        self.logger.debug("Removing impossible columns..")
+    def remove_impossible_mappings_and_reoptimize(self, currently_fixed_allocations, fixed_requests, lp_computation_mode):
+        self.logger.debug("Removing mappings that would violate capacities given the current state..")
         for req in self.requests:
             if req in fixed_requests:
                 continue
@@ -2186,86 +2377,130 @@ class RandRoundSepLPOptDynVMP(object):
                     self.adapted_variables.append(self.mapping_variables[req][mapping_index])
 
 
-        self.logger.debug("Re-compute after removal of stupid mappings...")
+        self.logger.debug("Re-compute LP after removal of impossible columns")
 
         self.model.update()
         self.model.optimize()
-        #
-        # self.update_dual_costs_and_reinit_dynvmps()
-        # if self.perform_separation_and_introduce_new_columns(ignore_requests=fixed_requests):
-        #     self.logger.debug("Separation yielded new mappings. Reoptimizing!")
-        #     self.model.update()
-        #     self.model.optimize()
-        #
-        # self.logger.debug("Removing impossible columns..")
-        # for req in self.requests:
-        #     if req in fixed_requests:
-        #         continue
-        #     for mapping_index, mapping in enumerate(self.mappings_of_requests[req]):
-        #         if not self.check_whether_mapping_would_obey_resource_violations(currently_fixed_allocations, self.allocations_of_mappings[req][mapping_index]):
-        #             self.mapping_variables[req][mapping_index].ub = 0.0
-        #             self.adapted_variables.append(self.mapping_variables[req][mapping_index])
-        #
-        #
-        # self.logger.debug("Re-compute after removal of stupid mappings...")
-        #
-        # self.model.update()
-        # self.model.optimize()
+        current_obj = self.model.getAttr("ObjVal")
+
+        if lp_computation_mode == LPRecomputationMode.RECOMPUTATION_WITH_SINGLE_SEPARATION:
+            new_columns_generated = True
+            while new_columns_generated:
+                self.update_dual_costs_and_reinit_dynvmps()
+                new_columns_generated = self.perform_separation_and_introduce_new_columns(current_objective=current_obj,
+                                                                                          ignore_requests=fixed_requests)
+                if new_columns_generated:
+                    self.logger.debug("Separation yielded new mappings. Reoptimizing!")
+                    self.model.update()
+                    self.model.optimize()
+                    current_obj = self.model.getAttr("ObjVal")
+                break
+
+            self.logger.debug("Removing columns which will not be feasible")
+            for req in self.requests:
+                if req in fixed_requests:
+                    continue
+                for mapping_index, mapping in enumerate(self.mappings_of_requests[req]):
+                    if not self.check_whether_mapping_would_obey_resource_violations(currently_fixed_allocations, self.allocations_of_mappings[req][mapping_index]):
+                        self.mapping_variables[req][mapping_index].ub = 0.0
+                        self.adapted_variables.append(self.mapping_variables[req][mapping_index])
+
+
+            self.logger.debug("Re-compute after removal of stupid mappings...")
+
+            self.model.update()
+            self.model.optimize()
 
 
 
+    def perform_rounding(self):
 
-    def round_solution_without_violations(self, number_of_samples):
+        actual_lp_computation_modes = []
+        if LPRecomputationMode.NONE in self.lp_recomputation_list:
+            actual_lp_computation_modes.append(LPRecomputationMode.NONE)
+        if LPRecomputationMode.RECOMPUTATION_WITHOUT_SEPARATION in self.lp_recomputation_list:
+            actual_lp_computation_modes.append(LPRecomputationMode.RECOMPUTATION_WITHOUT_SEPARATION)
+        if LPRecomputationMode.RECOMPUTATION_WITH_SINGLE_SEPARATION in self.lp_recomputation_list:
+            actual_lp_computation_modes.append(LPRecomputationMode.RECOMPUTATION_WITH_SINGLE_SEPARATION)
 
-        best_solution_tuple = None
+        for lp_computation_mode in actual_lp_computation_modes:
+            for rounding_order in self.rounding_order_list:
+                result_list = self.round_solution_without_violations(lp_computation_mode, rounding_order)
+                for solution in result_list:
+                    self.result.add_solution(rounding_order, lp_computation_mode, solution=solution)
+                self.logger.debug(self.result._get_solution_overview())
 
-        L = {}
+    def round_solution_without_violations(self, lp_computation_mode, rounding_order):
 
-        for q in xrange(number_of_samples):
-            time_rr0 = time.clock()
+        A = {}
 
-            profit, max_node_load, max_edge_load = self.rounding_iteration_violations_without_violations(L)
+        result_list = []
+        for q in xrange(self.rounding_samples_per_lp_recomputation_mode[lp_computation_mode]):
+            #recompute optimal solution
+            self.model.optimize()
 
-            time_rr = time.clock() - time_rr0
+            time_rr0 = time.time()
 
-            solution_tuple = rrt.RandomizedRoundingSolutionData(profit=profit,
-                                                                max_node_load=max_node_load,
-                                                                max_edge_load=max_edge_load,
-                                                                time_to_round_solution=time_rr)
+            solution, profit, max_node_load, max_edge_load = self.rounding_iteration_violations_without_violations(A, lp_computation_mode, rounding_order)
 
-            if best_solution_tuple is None or best_solution_tuple.profit < solution_tuple.profit:
-                best_solution_tuple = solution_tuple
+            if lp_computation_mode != LPRecomputationMode.NONE:
+                self.model.reset()
+                self._load_warmstart_lp_basis()
+                self.model.optimize()
 
-        return best_solution_tuple
+            time_rr = time.time() - time_rr0
 
-    def _initialize_load_dict(self, L):
+            if not solution.validate_solution():
+                self.logger.info("ERROR: scenario solution did not validate!")
+            if not solution.validate_solution_fulfills_capacity():
+                self.logger.info("ERROR: scenario solution did not satisfy capacity constraints!")
+
+            solution_tuple = RandomizedRoundingSolution(solution=solution,
+                                                        profit=profit,
+                                                        max_node_load=max_node_load,
+                                                        max_edge_load=max_edge_load,
+                                                        time_to_round_solution=time_rr)
+
+            result_list.append(solution_tuple)
+
+        return result_list
+
+    def _initialize_allocations_dict(self, A):
         sub = self.scenario.substrate
         for snode in sub.nodes:
             for ntype in sub.node[snode]["capacity"]:
-                L[(ntype, snode)] = 0.0
+                A[(ntype, snode)] = 0.0
         for u, v in sub.edges:
-            L[(u, v)] = 0.0
+            A[(u, v)] = 0.0
 
-    def rounding_iteration_violations_without_violations(self, L):
-        r_prime = list()
+    def rounding_iteration_violations_without_violations(self, A, lp_computation_mode, rounding_order):
+        processed_reqs = set()
+        unprocessed_reqs = set(self.scenario.requests)
         B = 0.0
-        self._initialize_load_dict(L)
+        self._initialize_allocations_dict(A)
 
-        do_rand = False
-        if do_rand:
-            req_list = list(self.scenario.requests)
+        req_list = list(self.scenario.requests)
+
+        if rounding_order == RoundingOrder.RANDOM:
             random.shuffle(req_list)
-        else:
+        elif rounding_order == RoundingOrder.STATIC_REQ_PROFIT:
             req_list = list(sorted(self.scenario.requests, key=lambda r: r.profit, reverse=True))
+        elif rounding_order == RoundingOrder.ACHIEVED_REQ_PROFIT:
+            cum_embedding_value_of_req = {req : sum(var.X for var in self.mapping_variables[req]) for req in self.scenario.requests}
+            req_list = list(sorted(self.scenario.requests, key=lambda r: r.profit * cum_embedding_value_of_req[r], reverse=True))
 
-        if len(self.adapted_variables) > 0:
-            for var in self.adapted_variables:
-                var.lb = 0.0
-                var.ub = 1.0
+        scenario_solution = solutions.IntegralScenarioSolution(name="", scenario=self.scenario)
 
-        for req in req_list:
+        for i in range(len(req_list)):
+            if rounding_order == RoundingOrder.ACHIEVED_REQ_PROFIT and lp_computation_mode != LPRecomputationMode.NONE:
+                cum_embedding_value_of_req = {req: sum(var.X for var in self.mapping_variables[req]) for req in
+                                              unprocessed_reqs}
+                req = max(unprocessed_reqs, key=lambda r: r.profit * cum_embedding_value_of_req[r])
+            else:
+                req = req_list[i]
 
-            self.remove_impossible_mappings_and_reoptimize(L, fixed_requests=r_prime)
+            if lp_computation_mode != LPRecomputationMode.NONE:
+                self.remove_impossible_mappings_and_reoptimize(A, fixed_requests=processed_reqs, lp_computation_mode=lp_computation_mode)
 
             p = random.random()
             total_flow = 0.0
@@ -2282,24 +2517,37 @@ class RandRoundSepLPOptDynVMP(object):
 
             if chosen_mapping is not None:
 
-                if self.check_whether_mapping_would_obey_resource_violations(L, self.allocations_of_mappings[req][chosen_mapping[0]]):
+                if self.check_whether_mapping_would_obey_resource_violations(A, self.allocations_of_mappings[req][chosen_mapping[0]]):
                     B += req.profit
                     for res in self.substrate_resources:
                         if res in self.allocations_of_mappings[req][chosen_mapping[0]].keys():
-                            L[res] += self.allocations_of_mappings[req][chosen_mapping[0]][res]
-                    self.mapping_variables[req][chosen_mapping[0]].lb = 1.0
-                    self.adapted_variables.append(self.mapping_variables[req][chosen_mapping[0]])
+                            A[res] += self.allocations_of_mappings[req][chosen_mapping[0]][res]
+
+                    if lp_computation_mode != LPRecomputationMode.NONE:
+                        self.mapping_variables[req][chosen_mapping[0]].lb = 1.0
+                        self.adapted_variables.append(self.mapping_variables[req][chosen_mapping[0]])
+
+                    scenario_solution.add_mapping(req, chosen_mapping[1])
             else:
-                for var in self.mapping_variables[req]:
-                    var.ub = 0
-                    self.adapted_variables.append(var)
+                if lp_computation_mode != LPRecomputationMode.NONE:
+                    for var in self.mapping_variables[req]:
+                        var.ub = 0
+                        self.adapted_variables.append(var)
 
+            processed_reqs.add(req)
+            unprocessed_reqs.remove(req)
 
-            r_prime.append(req)
+        if len(self.adapted_variables) > 0:
+            for var in self.adapted_variables:
+                var.lb = 0.0
+                var.ub = 1.0
+            #TODO: handle the case with separation such that introduced columns are removed or at least newly generated
+            #TODO: variables get a warmstart basis
+            #reset adapted variables
+            self.adapted_variables = []
 
-
-        max_node_load, max_edge_load = self.calc_max_loads(L)
-        return B, max_node_load, max_edge_load
+        max_node_load, max_edge_load = self.calc_max_loads(A)
+        return scenario_solution, B, max_node_load, max_edge_load
 
 
     def calc_max_loads(self, L):
