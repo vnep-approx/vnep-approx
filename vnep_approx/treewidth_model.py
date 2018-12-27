@@ -2366,8 +2366,8 @@ class RandRoundSepLPOptDynVMPCollection(object):
         self.result = RandRoundSepLPOptDynVMPCollectionResult(scenario=self.scenario,
                                                               lp_computation_information=sep_lp_solution)
 
-        best_solution = self.perform_rounding()
-        self.logger.info("Best solution by rounding is {}".format(best_solution))
+        self.perform_rounding()
+        #self.logger.info("Best solution by rounding is {}".format(best_solution))
 
         return self.result
 
@@ -2375,7 +2375,7 @@ class RandRoundSepLPOptDynVMPCollection(object):
 
 
     def remove_impossible_mappings_and_reoptimize(self, currently_fixed_allocations, fixed_requests, lp_computation_mode):
-        self.logger.debug("Removing mappings that would violate capacities given the current state..")
+        #self.logger.debug("Removing mappings that would violate capacities given the current state..")
         for req in self.requests:
             if req in fixed_requests:
                 continue
@@ -2385,7 +2385,7 @@ class RandRoundSepLPOptDynVMPCollection(object):
                     self.adapted_variables.append(self.mapping_variables[req][mapping_index])
 
 
-        self.logger.debug("Re-compute LP after removal of impossible columns")
+        #self.logger.debug("Re-compute LP after removal of impossible columns")
 
         self.model.update()
         self.model.optimize()
@@ -2398,13 +2398,13 @@ class RandRoundSepLPOptDynVMPCollection(object):
                 new_columns_generated = self.perform_separation_and_introduce_new_columns(current_objective=current_obj,
                                                                                           ignore_requests=fixed_requests)
                 if new_columns_generated:
-                    self.logger.debug("Separation yielded new mappings. Reoptimizing!")
+                    #self.logger.debug("Separation yielded new mappings. Reoptimizing!")
                     self.model.update()
                     self.model.optimize()
                     current_obj = self.model.getAttr("ObjVal")
                 break
 
-            self.logger.debug("Removing columns which will not be feasible")
+            #self.logger.debug("Removing columns which will not be feasible")
             for req in self.requests:
                 if req in fixed_requests:
                     continue
@@ -2414,7 +2414,7 @@ class RandRoundSepLPOptDynVMPCollection(object):
                         self.adapted_variables.append(self.mapping_variables[req][mapping_index])
 
 
-            self.logger.debug("Re-compute after removal of stupid mappings...")
+            #self.logger.debug("Re-compute after removal of stupid mappings...")
 
             self.model.update()
             self.model.optimize()
@@ -2436,13 +2436,16 @@ class RandRoundSepLPOptDynVMPCollection(object):
                 result_list = self.round_solution_without_violations(lp_computation_mode, rounding_order)
                 for solution in result_list:
                     self.result.add_solution(rounding_order, lp_computation_mode, solution=solution)
-                self.logger.debug(self.result._get_solution_overview())
+        self.logger.debug(self.result._get_solution_overview())
 
     def round_solution_without_violations(self, lp_computation_mode, rounding_order):
 
         A = {}
 
         result_list = []
+
+        self.logger.debug("Executing rounding according to settings: {} {}".format(lp_computation_mode.value, rounding_order.value))
+
         for q in xrange(self.rounding_samples_per_lp_recomputation_mode[lp_computation_mode]):
             #recompute optimal solution
             self.model.optimize()
