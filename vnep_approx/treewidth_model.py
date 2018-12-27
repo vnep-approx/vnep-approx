@@ -1349,6 +1349,7 @@ class SeparationLPSolution(modelcreator.AlgorithmResult):
                  gurobi_runtimes,
                  status,
                  profit,
+                 number_of_generated_mappings
                  ):
         super(SeparationLPSolution, self).__init__()
         self.time_preprocessing = time_preprocessing
@@ -1360,6 +1361,7 @@ class SeparationLPSolution(modelcreator.AlgorithmResult):
         self.gurobi_runtimes = gurobi_runtimes
         self.status = status
         self.profit = profit
+        self.number_of_generated_mappings = number_of_generated_mappings
 
     def get_solution(self):
         return self
@@ -1690,6 +1692,8 @@ class SeparationLP_OptDynVMP(object):
             anonymous_init_runtimes.append(self.dynvmp_runtimes_initialization[req])
             anonymous_computation_runtimes.append(self.dynvmp_runtimes_computation[req])
 
+        number_of_generated_mappings = sum([len(self.mapping_variables[req]) for req in self.requests])
+
         self.result = SeparationLPSolution(self.time_preprocess,
                                            self.time_optimization,
                                            0,
@@ -1698,7 +1702,8 @@ class SeparationLP_OptDynVMP(object):
                                            anonymous_computation_runtimes,
                                            self.gurobi_runtimes,
                                            self.status,
-                                           objVal)
+                                           objVal,
+                                           number_of_generated_mappings)
 
         return self.result
 
@@ -2344,6 +2349,8 @@ class RandRoundSepLPOptDynVMPCollection(object):
             anonymous_init_runtimes.append(self.dynvmp_runtimes_initialization[req])
             anonymous_computation_runtimes.append(self.dynvmp_runtimes_computation[req])
 
+        number_of_generated_mappings = sum([len(self.mapping_variables[req]) for req in self.requests])
+
 
         sep_lp_solution = SeparationLPSolution(self.time_preprocess,
                                                self.time_optimization,
@@ -2353,7 +2360,8 @@ class RandRoundSepLPOptDynVMPCollection(object):
                                                anonymous_computation_runtimes,
                                                self.gurobi_runtimes,
                                                self.status,
-                                               objVal)
+                                               objVal,
+                                               number_of_generated_mappings)
 
         self.result = RandRoundSepLPOptDynVMPCollectionResult(scenario=self.scenario,
                                                               lp_computation_information=sep_lp_solution)
