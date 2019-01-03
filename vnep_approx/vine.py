@@ -223,6 +223,9 @@ class OfflineViNEAlgorithm(object):
 
             solution.add_mapping(req, mapping)
 
+        assert solution.validate_solution()
+        assert solution.validate_solution_fulfills_capacity()
+
         overall_runtime = time.time() - overall_runtime_start
         result = OfflineViNEResult(
             solution=solution,
