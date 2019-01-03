@@ -107,8 +107,7 @@ class OfflineViNEResult(mc.AlgorithmResult):
     def compute_profit(self):
         profit = 0.0
         for req, mapping in self.solution.request_mapping.iteritems():
-            if mapping is not None:
-                profit += req.profit
+            profit += req.profit
         return profit
 
     def get_solution(self):
@@ -221,7 +220,8 @@ class OfflineViNEAlgorithm(object):
             runtime_per_request[req] = time.time() - t_start
             mapping_status_per_request[req] = status
 
-            solution.add_mapping(req, mapping)
+            if mapping is not None:
+                solution.add_mapping(req, mapping)
 
         assert solution.validate_solution()
         assert solution.validate_solution_fulfills_capacity()
