@@ -491,6 +491,11 @@ class ModelCreatorCactusDecomposition(modelcreator.AbstractEmbeddingModelCreator
             # print "Edge load ({}, {}):".format(u, v)[:37].ljust(40), expr, "= 0"
 
     def recover_fractional_solution_from_variables(self):
+        """
+        Extracts the solution decompositions from the fractional variables.
+
+        :return:
+        """
         self.logger.info("Recovering fractional solution for {}".format(self.scenario.name))
 
         flow_dict_start_time = time.clock()
