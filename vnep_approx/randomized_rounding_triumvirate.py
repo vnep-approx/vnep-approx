@@ -36,8 +36,6 @@ random = Random("randomized_rounding")
 class RandomizedRoundingError(Exception): pass
 
 
-NUMBER_OF_ITERATIONS = 1000
-
 RandomizedRoundingMetaData = namedtuple("RandomizedRoundingMetaData", ["time_preprocessing", "time_optimization", "time_postprocessing",
                                                                        "lost_flow_in_decomposition", "temporal_log", "status"])
 RandomizedRoundingSolutionData = namedtuple("RandomizedRoundingSolutionData", ["profit",
@@ -76,13 +74,16 @@ class RandomizedRoundingTriumvirate(object):
     ''' This class implements 3 different randomized rounding heuristics for obtaining integral mappings.
         The first class of heuristics applies rounding directly. Either the solution minimizing resource violations or the
         one maximizing the profit is returned.
-        The third heuristic
+        The second one does round but discards any (chosen) mappings whose addition would violate resource capacities.
+        The last one simply computes the optimal solution of the corresponding Multi-Dimensional Knapsack (MDK).
+        Specifically, given the decomposed solution for each mapping a binary variable is introduced such that capacities
+        are not exceeded and for each request at most one mapping is selected.
 
     '''
 
     ALGORITHM_ID = "RandomizedRoundingTriumvirate"
 
-    def __init__(self, scenario, gurobi_settings=None, logger=None):
+    def __init__(self, scenario, gurobi_settings=None, logger=None, number_of_solutions_to_round=1000, mdk_gurobi_parameters=None):
         self.scenario = scenario
         self.mc = modelcreator_ecg_decomposition.ModelCreatorCactusDecomposition(self.scenario,
                                                                                  gurobi_settings=gurobi_settings,
@@ -100,6 +101,31 @@ class RandomizedRoundingTriumvirate(object):
                 self.substrate_node_resources.append((ntype, snode))
                 self.substrate_resources.append((ntype, snode))
 
+        self.number_of_solutions_to_round = number_of_solutions_to_round
+        if mdk_gurobi_parameters is None:
+            #default settings according to IFIP 2018 evaluation
+            self.mdk_gurobi_settings = modelcreator.GurobiSettings(timelimit=120,
+                                                                   threads=1,
+                                                                   logtoconsole=0)
+        else:
+            if isinstance(mdk_gurobi_parameters, modelcreator.GurobiSettings):
+                self.mdk_gurobi_settings = mdk_gurobi_parameters
+            elif isinstance(mdk_gurobi_parameters, tuple):
+                gurobisettings_dict = {}
+                key = None
+                if len(mdk_gurobi_parameters) % 2 != 0:
+                    raise ValueError("MDK Parameter Settings could not be converted to dictionary...")
+                for index, elem in enumerate(mdk_gurobi_parameters):
+                    if index % 2 == 0:
+                        key = elem
+                    if index % 2 == 1:
+                        gurobisettings_dict[key] = elem
+                self.mdk_gurobi_settings = modelcreator.GurobiSettings(**gurobisettings_dict)
+
+
+        self.logger.info("MDK SETTINGS ARE...")
+        self.logger.info(self.mdk_gurobi_settings)
+
     def init_model_creator(self):
         self.mc.init_model_creator()
 
@@ -116,11 +142,11 @@ class RandomizedRoundingTriumvirate(object):
                                                temporal_log=self.temporal_log,
                                                status=self.mc.status)
 
-        collection_of_samples_with_violations = self.collect_X_randomized_rounding_samples_with_potential_violations(NUMBER_OF_ITERATIONS)
+        collection_of_samples_with_violations = self.collect_X_randomized_rounding_samples_with_potential_violations(self.number_of_solutions_to_round)
 
-        result_wo_violations = self.round_solution_without_violations(NUMBER_OF_ITERATIONS)
+        result_wo_violations = self.round_solution_without_violations(self.number_of_solutions_to_round)
 
-        mdk = DecompositionMDK(self.scenario, self._fractional_solution, logger=self.logger)
+        mdk = DecompositionMDK(self.scenario, self._fractional_solution, logger=self.logger, gurobi_settings=self.mdk_gurobi_settings)
         mdk.init_model_creator()
         mdk_solution = mdk.compute_integral_solution()
 
@@ -362,12 +388,6 @@ class DecompositionMDK(modelcreator.AbstractModelCreator):
                 objective.addTerms(req.profit, self.var_embedding_variable[req][fractional_mapping])
         self.model.setObjective(objective, GRB.MAXIMIZE)
 
-    def compute_integral_solution(self):
-        self.model.setParam("LogToConsole", 0)
-        self.model.setParam("TimeLimit", 120)
-        self.model.setParam("Threads", 1)
-
-        return super(DecompositionMDK, self).compute_integral_solution()
 
     def preprocess_input(self):
         pass
