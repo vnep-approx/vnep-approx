@@ -83,7 +83,7 @@ class RandomizedRoundingTriumvirate(object):
 
     ALGORITHM_ID = "RandomizedRoundingTriumvirate"
 
-    def __init__(self, scenario, gurobi_settings=None, logger=None, number_of_solutions_to_round=1000, mdk_gurobi_parameters=None, write_lp_file=False):
+    def __init__(self, scenario, gurobi_settings=None, logger=None, number_of_solutions_to_round=1000, mdk_gurobi_parameters=None, write_lp_file_format=None):
         self.scenario = scenario
 
 
@@ -91,8 +91,8 @@ class RandomizedRoundingTriumvirate(object):
         logger.info("Starting randomized rounding trivate for scenario {}".format(scenario.name))
 
         lp_output_file = None
-        if write_lp_file:
-            lp_output_file = scenario.name + ".lp"
+        if write_lp_file_format is not None:
+            lp_output_file = scenario.name + write_lp_file_format
 
 
         self.mc = modelcreator_ecg_decomposition.ModelCreatorCactusDecomposition(self.scenario,
