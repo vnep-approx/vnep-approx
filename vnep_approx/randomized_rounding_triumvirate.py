@@ -92,7 +92,7 @@ class RandomizedRoundingTriumvirate(object):
 
         lp_output_file = None
         if write_lp_file:
-            lp_output_file = scenario.name
+            lp_output_file = scenario.name + ".lp"
 
 
         self.mc = modelcreator_ecg_decomposition.ModelCreatorCactusDecomposition(self.scenario,
