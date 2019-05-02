@@ -113,7 +113,7 @@ class ModelCreatorCactusDecomposition(modelcreator.AbstractEmbeddingModelCreator
             for i, ecg_node_dict in ext_graph.source_nodes.iteritems():
                 if i not in self.var_node_flow[req]:
                     self.var_node_flow[req][i] = {}
-                for u, ecg_node in ecg_node_dict.iteritems():f
+                for u, ecg_node in ecg_node_dict.iteritems():  
                     if u in self.var_node_flow[req][i]:
                         continue
                     variable_id = modelcreator.construct_name("flow_induction", req_name=req.name, vnode=i, snode=u)
