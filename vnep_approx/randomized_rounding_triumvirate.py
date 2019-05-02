@@ -83,11 +83,22 @@ class RandomizedRoundingTriumvirate(object):
 
     ALGORITHM_ID = "RandomizedRoundingTriumvirate"
 
-    def __init__(self, scenario, gurobi_settings=None, logger=None, number_of_solutions_to_round=1000, mdk_gurobi_parameters=None):
+    def __init__(self, scenario, gurobi_settings=None, logger=None, number_of_solutions_to_round=1000, mdk_gurobi_parameters=None, write_lp_files=False):
         self.scenario = scenario
+
+
+
+        logger.info("Starting randomized rounding trivate for scenario {}".format(scenario.name))
+
+        lp_output_file = None
+        if write_lp_files:
+            lp_output_file = scenario.name
+
+
         self.mc = modelcreator_ecg_decomposition.ModelCreatorCactusDecomposition(self.scenario,
                                                                                  gurobi_settings=gurobi_settings,
-                                                                                 logger=logger)
+                                                                                 logger=logger,
+                                                                                 lp_output_file=lp_output_file)
         self.temporal_log = self.mc.temporal_log
         self._fractional_solution = None
         self.solution = None
@@ -123,13 +134,12 @@ class RandomizedRoundingTriumvirate(object):
                 self.mdk_gurobi_settings = modelcreator.GurobiSettings(**gurobisettings_dict)
 
 
-        self.logger.info("MDK SETTINGS ARE...")
-        self.logger.info(self.mdk_gurobi_settings)
+
 
     def init_model_creator(self):
         self.mc.init_model_creator()
 
-    def compute_integral_solution(self, onlyloads=True):
+    def compute_integral_solution(self):
 
         self._fractional_solution = self.mc.compute_fractional_solution()
         if self._fractional_solution is None:

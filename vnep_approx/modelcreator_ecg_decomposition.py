@@ -66,8 +66,8 @@ class ModelCreatorCactusDecomposition(modelcreator.AbstractEmbeddingModelCreator
 
     ALGORITHM_ID = "CactusDecomposition"
 
-    def __init__(self, scenario, gurobi_settings=None, logger=None):
-        super(ModelCreatorCactusDecomposition, self).__init__(scenario=scenario, gurobi_settings=gurobi_settings, logger=logger)
+    def __init__(self, scenario, gurobi_settings=None, logger=None, lp_output_file=None):
+        super(ModelCreatorCactusDecomposition, self).__init__(scenario=scenario, gurobi_settings=gurobi_settings, logger=logger, lp_output_file=lp_output_file)
 
         self._originally_allowed_nodes = {}
         self.extended_graphs = {}
@@ -113,7 +113,7 @@ class ModelCreatorCactusDecomposition(modelcreator.AbstractEmbeddingModelCreator
             for i, ecg_node_dict in ext_graph.source_nodes.iteritems():
                 if i not in self.var_node_flow[req]:
                     self.var_node_flow[req][i] = {}
-                for u, ecg_node in ecg_node_dict.iteritems():
+                for u, ecg_node in ecg_node_dict.iteritems():f
                     if u in self.var_node_flow[req][i]:
                         continue
                     variable_id = modelcreator.construct_name("flow_induction", req_name=req.name, vnode=i, snode=u)
