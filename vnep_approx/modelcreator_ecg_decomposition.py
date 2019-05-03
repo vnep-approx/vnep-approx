@@ -519,7 +519,7 @@ class ModelCreatorCactusDecomposition(modelcreator.AbstractEmbeddingModelCreator
                               substrate_resources=self.substrate.substrate_resources,  # TODO: this is redundant, we could rewrite the Decomposition so that it receives a substrateX
                               logger=self.logger)
             mapping_flow_load_list = d.compute_mappings()
-            self.lost_flow_in_the_decomposition = d.lost_flow_in_the_decomposition
+            self.lost_flow_in_the_decomposition += d.lost_flow_in_the_decomposition
             for mapping, flow, load in mapping_flow_load_list:
                 self.solution.add_mapping(req, mapping, flow, load)
 
