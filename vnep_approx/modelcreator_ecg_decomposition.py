@@ -1121,13 +1121,16 @@ class Decomposition(object):
                 if ext_path.start_node != i:
                     continue
                 flow_path, sink = self._choose_flow_path_in_extended_path(ext_path, mapping)
-                self._process_path(ext_path, flow_path, mapping, queue)
+                if flow_path is not None:
+                    self._process_path(ext_path, flow_path, mapping, queue)
+                else:
+                    self._abort_decomposition_based_on_numerical_trouble = True
         return mapping
 
     def _map_root_node_on_node_with_nonzero_flow(self, mapping):
         root = self.ext_graph.root
         def outgoing_flow_func(value):
-            print value
+            #print value
             u, ext_node = value
             return max(self.flow_values["edge"].get(eedge, 0.0) - self._used_flow["edge"].get(eedge, 0.0)
                        for eedge in self.ext_graph.out_edges[ext_node])
