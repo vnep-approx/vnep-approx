@@ -1089,6 +1089,9 @@ class Decomposition(object):
         mapping = solutions.Mapping(mapping_name, self.request, self.substrate, True)
 
         ext_root = self._map_root_node_on_node_with_nonzero_flow(mapping)
+        if ext_root is None:
+            self._abort_decomposition_based_on_numerical_trouble = True
+            return None
         self._used_ext_graph_node_resources.add(ext_root)
         queue = {self.ext_graph.root}
         while queue:
@@ -1145,6 +1148,7 @@ class Decomposition(object):
         else:
             self.logger.warning("WARNING: No valid root mapping found for {}.".format(self.request.name))
             self._abort_decomposition_based_on_numerical_trouble = True
+            return None
 
     def _choose_flow_path_in_extended_cycle(self, branch, mapping, sink=None):
         if sink is None:  # this is the case for the first processed branch
@@ -1157,6 +1161,7 @@ class Decomposition(object):
             u_sink = self.ext_graph.node[sink]["substrate_node"]
             ext_path = branch[u_sink]
             sink_nodes = [sink]
+
         eedge_path, sink = self._choose_flow_path_in_extended_path(ext_path, mapping, sink_nodes=sink_nodes)
         return eedge_path, ext_path, sink
 
