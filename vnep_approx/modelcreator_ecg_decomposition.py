@@ -707,6 +707,299 @@ class ModelCreatorCactusDecomposition(modelcreator.AbstractEmbeddingModelCreator
             self.model.addConstr(cycle_node_mapping_constraint, GRB.EQUAL, 1.0, name=name)
 
 
+# class Decomposition(object):
+#     def __init__(self,
+#                  req,
+#                  substrate,
+#                  flow_values,
+#                  fractional_decomposition_abortion_flow,
+#                  fractional_decomposition_accuracy,
+#                  extended_graph=None,  # optional, can be provided by the caller to save time
+#                  substrate_resources=None,  # optional, can be provided by the caller to save time
+#                  logger=None):
+#         if logger is None:
+#             logger = util.get_logger("Decomposition", make_file=False, propagate=True)
+#         self.logger = logger
+#
+#         # TODO: Replace with new SubstrateX
+#         self.substrate = substrate
+#         if substrate_resources is None:
+#             substrate_resources = list(self.substrate.edges)
+#             for ntype in self.substrate.get_types():
+#                 for snode in self.substrate.get_nodes_by_type(ntype):
+#                     substrate_resources.append((ntype, snode))
+#
+#         self.substrate_resources = substrate_resources
+#
+#         self.flow_values = flow_values
+#
+#         self.request = req
+#         if extended_graph is None:
+#             extended_graph = extendedcactusgraph.ExtendedCactusGraph(req, self.substrate)
+#         self.ext_graph = extended_graph
+#
+#         self._mapping_count = None
+#         self._used_flow = None
+#
+#         self.fractional_decomposition_abortion_flow = fractional_decomposition_abortion_flow
+#         self.fractional_decomposition_accuracy = fractional_decomposition_accuracy
+#         self._used_ext_graph_edge_resources = None  # set of edges in the extended graph that are used in a single iteration of the decomposition algorithm
+#         self._used_ext_graph_node_resources = None  # same for nodes
+#         self._abort_decomposition_based_on_numerical_trouble = False
+#         self.lost_flow_in_the_decomposition = 0.0
+#         self.scaling_factor = 10000000
+#
+#     def scale_values(self):
+#         self.flow_values["embedding"] = int(self.flow_values["embedding"] * self.scaling_factor)
+#         for node in self.flow_values["node"].keys():
+#             for key in self.flow_values["node"][node].keys():
+#                 self.flow_values["node"][node][key] = int(self.flow_values["node"][node][key] * self.scaling_factor)
+#         for edge in self.flow_values["edge"].keys():
+#             self.flow_values["edge"][edge] = int(self.flow_values["edge"][edge] * self.scaling_factor)
+#
+#     def compute_mappings(self):
+#
+#         # self.scale_values()
+#
+#         result = []
+#         self._mapping_count = 0
+#         self._used_flow = {"embedding": 0.0, "node": {}, "edge": {}}
+#         while (self.flow_values["embedding"] - self._used_flow["embedding"]) > self.fractional_decomposition_accuracy:
+#             if self._abort_decomposition_based_on_numerical_trouble:
+#                 return result
+#             self._used_ext_graph_edge_resources = set()  # use the request's original root to store the maximal possible flow according to embedding value
+#             self._used_ext_graph_node_resources = set()
+#             mapping = self._decomposition_iteration()
+#
+#             if not self._abort_decomposition_based_on_numerical_trouble:
+#                 # diminish the flow on the used edges
+#                 node_flow_list = []
+#                 for ext_node in self._used_ext_graph_node_resources:
+#                     i, u = self.ext_graph.get_associated_original_resources(ext_node)
+#                     node_flow_list.append(
+#                         self.flow_values["node"].get(i, {u: 0.0})[u] - self._used_flow["node"].get(ext_node, 0.0)
+#                     )
+#                 flow = min(
+#                     min(node_flow_list),
+#                     self.flow_values["embedding"] - self._used_flow.get("embedding", 0.0),
+#                     min(self.flow_values["edge"].get(eedge, 0.0) - self._used_flow["edge"].get(eedge, 0.0) for eedge in self._used_ext_graph_edge_resources)
+#                 )
+#                 print "Found mapping of flow {}".format(flow)
+#                 self._used_flow["embedding"] += flow
+#                 for eedge in self._used_ext_graph_edge_resources:
+#                     self._used_flow["edge"].setdefault(eedge, 0.0)
+#                     self._used_flow["edge"][eedge] += flow
+#                 for enode in self._used_ext_graph_node_resources:
+#                     self._used_flow["node"].setdefault(enode, 0.0)
+#                     self._used_flow["node"][enode] += flow
+#                 load = self._calculate_substrate_load_for_mapping(mapping)
+#                 result.append((mapping, flow, load))
+#         remaining_flow = self.flow_values["embedding"] - self._used_flow["embedding"]
+#         if remaining_flow > 0:
+#             self.lost_flow_in_the_decomposition += remaining_flow / float(self.scaling_factor)
+#             self.logger.warning("WARNING: Lost {} amount of flow as the decomposition did not perfectly work.".format(
+#                 remaining_flow
+#             ))
+#         return result
+#
+#     def _decomposition_iteration(self):
+#         self._mapping_count += 1
+#         mapping_name = modelcreator.construct_name("mapping_", req_name=self.request.name, other=self._mapping_count)
+#         mapping = solutions.Mapping(mapping_name, self.request, self.substrate, True)
+#
+#         ext_root = self._map_root_node_on_node_with_nonzero_flow(mapping)
+#         self._used_ext_graph_node_resources.add(ext_root)
+#         queue = {self.ext_graph.root}
+#         while queue:
+#             i = queue.pop()
+#             for cycle in self.ext_graph.ecg_cycles:
+#                 if cycle.start_node != i:
+#                     continue
+#                 branch_1 = cycle.ext_graph_branches[0]
+#                 branch_2 = cycle.ext_graph_branches[1]
+#
+#                 flow_path_1, ext_path_1, sink = self._choose_flow_path_in_extended_cycle(branch_1, mapping)
+#                 if flow_path_1 is None:
+#                     self._abort_decomposition_based_on_numerical_trouble = True
+#                     break
+#
+#                 flow_path_2, ext_path_2, sink_2 = self._choose_flow_path_in_extended_cycle(branch_2, mapping, sink=sink)
+#                 if flow_path_2 is None:
+#                     self._abort_decomposition_based_on_numerical_trouble = True
+#                     break
+#
+#                 if sink_2 != sink:
+#                     msg = "Both branches of cycle need to start & end in the same node: {}, {}".format(sink, sink_2)
+#                     raise CactusDecompositionError(msg)
+#
+#                 self._process_path(ext_path_1, flow_path_1, mapping, queue)
+#                 self._process_path(ext_path_2, flow_path_2, mapping, queue)
+#             for ext_path in self.ext_graph.ecg_paths:
+#                 if ext_path.start_node != i:
+#                     continue
+#                 flow_path, sink = self._choose_flow_path_in_extended_path(ext_path, mapping)
+#                 if flow_path is None:
+#                     self._abort_decomposition_based_on_numerical_trouble = True
+#                 self._process_path(ext_path, flow_path, mapping, queue)
+#         return mapping
+#
+#     def _map_root_node_on_node_with_nonzero_flow(self, mapping):
+#         root = self.ext_graph.root
+#
+#         def outgoing_flow_func(value):
+#             print value
+#             u, ext_node = value
+#             return max(self.flow_values["edge"].get(eedge, 0.0) - self._used_flow["edge"].get(eedge, 0.0)
+#                        for eedge in self.ext_graph.out_edges[ext_node])
+#
+#         u, ext_node = max(self.ext_graph.source_nodes[root].iteritems(), key=outgoing_flow_func)
+#
+#         ext_node_outflow = outgoing_flow_func((u, ext_node))
+#
+#         if ext_node_outflow > self.fractional_decomposition_accuracy:
+#             mapping.map_node(root, u)
+#             return ext_node
+#         else:
+#             self.logger.warning("WARNING: No valid root mapping found for {}.".format(self.request.name))
+#             self._abort_decomposition_based_on_numerical_trouble = True
+#
+#
+#
+#     def _choose_flow_path_in_extended_cycle(self, branch, mapping, sink=None):
+#         if sink is None:  # this is the case for the first processed branch
+#             ext_path = self._choose_path_for_cycle_branch(branch, self.ext_graph, mapping)
+#             if ext_path is None:
+#                 self._abort_decomposition_based_on_numerical_trouble = True
+#                 return None, None, None
+#             sink_nodes = [sink_node for (last_layer_node, sink_node) in ext_path.extended_path[ext_path.end_node]]
+#         else:  # for the second processed branch, the sink mapping is already fixed and this branch must be chosen accordingly
+#             u_sink = self.ext_graph.node[sink]["substrate_node"]
+#             ext_path = branch[u_sink]
+#             sink_nodes = [sink]
+#         eedge_path, sink = self._choose_flow_path_in_extended_path(ext_path, mapping, sink_nodes=sink_nodes)
+#         return eedge_path, ext_path, sink
+#
+#     def _choose_path_for_cycle_branch(self, branch, ext_graph, mapping):
+#         chosen_path = None
+#         # Iterate over the branch copies corresponding to different target node mappings
+#         def outgoing_flow_of_path(value):
+#             end_node, path = value
+#             ext_source = ext_graph.source_nodes[path.start_node][mapping.mapping_nodes[path.start_node]]
+#             return max(self.flow_values["edge"].get(eedge, 0.0) - self._used_flow["edge"].get(eedge, 0.0) for eedge in ext_graph.out_edges[ext_source])
+#
+#         end_node, path = max(branch.iteritems(), key=outgoing_flow_of_path)
+#         if outgoing_flow_of_path((end_node, path)) > self.fractional_decomposition_accuracy:
+#             chosen_path = path
+#
+#         if chosen_path is None:
+#             self.logger.warning("WARNING: Couldn't determine a branch to start the decomposition ...")
+#             self._abort_decomposition_based_on_numerical_trouble = True
+#         return chosen_path
+#
+#     def _choose_flow_path_in_extended_path(self, path, mapping, sink_nodes=None):
+#         # if a sink node is specified, we search the extended graph until that node is reached. Otherwise, all sink nodes are viable:
+#         if sink_nodes is None:
+#             sink_nodes = self.ext_graph.sink_nodes[path.end_node].values()
+#         ext_source = self.ext_graph.source_nodes[path.start_node][mapping.mapping_nodes[path.start_node]]
+#         # Depth-First Search until we hit one of the viable sinks:
+#         predecessor = {enode: None for enode in self.ext_graph.nodes}
+#         stack = [ext_source]
+#         sink = None
+#         while stack:
+#             current_enode = stack.pop()
+#             # print "path search, current node:", current_enode
+#             if current_enode in sink_nodes:
+#                 sink = current_enode
+#                 break
+#             for eedge in self.ext_graph.out_edges[current_enode]:
+#                 if eedge not in path.extended_edges:
+#                     continue
+#                 ee_tail, ee_head = eedge
+#                 # ignore flow-less edges:
+#
+#                 flow = self.flow_values["edge"].get(eedge, 0) - self._used_flow["edge"].get(eedge, 0)
+#                 if flow > self.fractional_decomposition_accuracy and predecessor[ee_head] is None:
+#                     stack.append(ee_head)
+#                     predecessor[ee_head] = ee_tail
+#         if sink is None:
+#             self.logger.warning("WARNING: Couldn't find a path in the decomposition process")
+#             return None, None
+#
+#         eedge_path = Decomposition._dfs_assemble_path_from_predecessor_dictionary(predecessor, ext_source, sink)
+#         for edge in eedge_path:
+#             self._used_ext_graph_edge_resources.add(edge)
+#             self._used_ext_graph_node_resources.add(sink)
+#         return eedge_path, sink
+#
+#     @staticmethod
+#     def _dfs_assemble_path_from_predecessor_dictionary(predecessor, ext_source_node, ext_sink_node):
+#         eedge_path = []
+#         current_enode = ext_sink_node
+#         while current_enode != ext_source_node:
+#             previous_hop = predecessor[current_enode]
+#             ext_edge = (previous_hop, current_enode)
+#             eedge_path.append(ext_edge)
+#             current_enode = previous_hop
+#         # reverse edges such that path leads from super source to super sink
+#         eedge_path.reverse()
+#         return eedge_path
+#
+#     def _process_path(self, extended_path, flow_path, mapping, queue):
+#         for ij in extended_path.original_path:
+#             i, j = ij
+#             for uu_ext in extended_path.extended_path[j]:
+#                 # extended_path.extended_path[j] should contain all inter-layer edges associated with the node mapping of j
+#                 if uu_ext in flow_path:
+#                     u1_ext, u2_ext = uu_ext
+#                     u1 = self.ext_graph.node[u1_ext]["substrate_node"]
+#                     u2 = self.ext_graph.node[u2_ext]["substrate_node"]
+#                     if u1 != u2:
+#                         msg = "Inter-layer edge should connect nodes corresponding to the same substrate node! Instead: {} -> {} (= {}, {})".format(u1_ext, u2_ext, u1, u2)
+#                         raise CactusDecompositionError(msg)
+#                     if j in mapping.mapping_nodes:
+#                         u_prev = mapping.mapping_nodes[j]  # previous mapping of
+#                         if u_prev != u1:
+#                             msg = "Tried remapping node {}, which was previously mapped to {}, to a different substrate node {}".format(j, u_prev, u1)
+#                             raise CactusDecompositionError(msg)
+#                     else:
+#                         mapping.map_node(j, u1)
+#             if j not in mapping.mapping_nodes:
+#                 raise CactusDecompositionError("Sanity Check: Mapping of node {} failed!".format(j))
+#
+#             if j in self.ext_graph.source_nodes:
+#                 queue.add(j)
+#                 self._used_ext_graph_node_resources.add(self.ext_graph.source_nodes[j][mapping.mapping_nodes[j]])
+#
+#             # extended_path.extended_path[ij] should contain all intra-layer edges associated with the edge mapping of ij:
+#             ext_graph_edge_mapping = [(self.ext_graph.node[ext_u]["substrate_node"], self.ext_graph.node[ext_v]["substrate_node"])
+#                                       for (ext_u, ext_v) in flow_path if (ext_u, ext_v) in extended_path.extended_path[ij]]
+#
+#             ij_original_orientation = ij
+#             if (j, i) in self.ext_graph.reversed_request_edges:
+#                 ext_graph_edge_mapping = [(v, u) for (u, v) in ext_graph_edge_mapping]
+#                 ext_graph_edge_mapping.reverse()
+#                 ij_original_orientation = (j, i)
+#             if any(uv not in self.substrate.edges for uv in ext_graph_edge_mapping):
+#                 msg = "Mapped edge {} onto edges {}, which are not substrate edges: {}".format(ij, ext_graph_edge_mapping, self.substrate.edges)
+#                 raise CactusDecompositionError(msg)
+#             mapping.map_edge(ij_original_orientation, ext_graph_edge_mapping)
+#
+#     def _calculate_substrate_load_for_mapping(self, mapping):
+#         load = {(x, y): 0.0 for (x, y) in self.substrate_resources}
+#         req = self.request
+#         for i in req.nodes:
+#             u = mapping.get_mapping_of_node(i)
+#             t = req.get_type(i)
+#             demand = req.get_node_demand(i)
+#             load[(t, u)] += demand
+#         for ij in req.edges:
+#             demand = req.get_edge_demand(ij)
+#             for uv in mapping.mapping_edges[ij]:
+#                 load[uv] += demand
+#         return load
+
+
+
 class Decomposition(object):
     def __init__(self,
                  req,
@@ -732,8 +1025,6 @@ class Decomposition(object):
         self.substrate_resources = substrate_resources
 
         self.flow_values = flow_values
-
-        self.paper_mode = True
 
         self.request = req
         if extended_graph is None:
@@ -809,11 +1100,13 @@ class Decomposition(object):
                 branch_2 = cycle.ext_graph_branches[1]
 
                 flow_path_1, ext_path_1, sink = self._choose_flow_path_in_extended_cycle(branch_1, mapping)
-                if self.paper_mode and flow_path_1 is None:
+                if flow_path_1 is None:
+                    self._abort_decomposition_based_on_numerical_trouble = True
                     break
 
                 flow_path_2, ext_path_2, sink_2 = self._choose_flow_path_in_extended_cycle(branch_2, mapping, sink=sink)
-                if self.paper_mode and flow_path_2 is None:
+                if flow_path_2 is None:
+                    self._abort_decomposition_based_on_numerical_trouble = True
                     break
 
                 if sink_2 != sink:
@@ -823,7 +1116,7 @@ class Decomposition(object):
                 self._process_path(ext_path_1, flow_path_1, mapping, queue)
                 self._process_path(ext_path_2, flow_path_2, mapping, queue)
             for ext_path in self.ext_graph.ecg_paths:
-                if self.paper_mode and self._abort_decomposition_based_on_numerical_trouble:
+                if self._abort_decomposition_based_on_numerical_trouble:
                     break
                 if ext_path.start_node != i:
                     continue
@@ -833,18 +1126,27 @@ class Decomposition(object):
 
     def _map_root_node_on_node_with_nonzero_flow(self, mapping):
         root = self.ext_graph.root
-        for (u, ext_node) in self.ext_graph.source_nodes[root].iteritems():
-            ext_node_outflow = sum(self.flow_values["edge"].get(eedge, 0.0) - self._used_flow["edge"].get(eedge, 0.0)
-                                   for eedge in self.ext_graph.out_edges[ext_node])
-            if ext_node_outflow > self.fractional_decomposition_accuracy:
-                mapping.map_node(root, u)
-                return ext_node
-        raise CactusDecompositionError("No valid root mapping found for {}.".format(self.request.name))
+        def outgoing_flow_func(value):
+            print value
+            u, ext_node = value
+            return max(self.flow_values["edge"].get(eedge, 0.0) - self._used_flow["edge"].get(eedge, 0.0)
+                       for eedge in self.ext_graph.out_edges[ext_node])
+
+        u, ext_node = max(self.ext_graph.source_nodes[root].iteritems(), key=outgoing_flow_func)
+
+        ext_node_outflow = outgoing_flow_func((u, ext_node))
+
+        if ext_node_outflow > self.fractional_decomposition_accuracy:
+            mapping.map_node(root, u)
+            return ext_node
+        else:
+            self.logger.warning("WARNING: No valid root mapping found for {}.".format(self.request.name))
+            self._abort_decomposition_based_on_numerical_trouble = True
 
     def _choose_flow_path_in_extended_cycle(self, branch, mapping, sink=None):
         if sink is None:  # this is the case for the first processed branch
             ext_path = self._choose_path_for_cycle_branch(branch, self.ext_graph, mapping)
-            if self.paper_mode and ext_path is None:
+            if ext_path is None:
                 self._abort_decomposition_based_on_numerical_trouble = True
                 return None, None, None
             sink_nodes = [sink_node for (last_layer_node, sink_node) in ext_path.extended_path[ext_path.end_node]]
@@ -856,31 +1158,49 @@ class Decomposition(object):
         return eedge_path, ext_path, sink
 
     def _choose_path_for_cycle_branch(self, branch, ext_graph, mapping):
+
         chosen_path = None
         # Iterate over the branch copies corresponding to different target node mappings
-        for end_node, path in branch.iteritems():
-
+        def outgoing_flow_of_path(value):
+            end_node, path = value
             ext_source = ext_graph.source_nodes[path.start_node][mapping.mapping_nodes[path.start_node]]
-            # print "shit starting now..."
-            for eedge in ext_graph.out_edges[ext_source]:
-                # print "ext_source is {}".format(ext_source)
-                ee_tail, ee_head = eedge
-                # print ee_tail, ee_head
+            return max(self.flow_values["edge"].get((eetail, eehead), 0.0) - self._used_flow["edge"].get((eetail, eehead), 0.0) for (eetail, eehead) in ext_graph.out_edges[ext_source] if eehead in path.extended_nodes)
 
-                if ee_head in path.extended_nodes:
-                    # print "identified {} as correctly belonging to {} (this doesn't really make sense)".format(eedge, ext_source)
-                    if self.flow_values["edge"].get(eedge, 0.0) - self._used_flow["edge"].get(eedge, 0.0) > self.fractional_decomposition_accuracy:
-                        # print "choosing path ... because of this edge!"
-                        chosen_path = path
-                        break
+        end_node, path = max(branch.iteritems(), key=outgoing_flow_of_path)
+        if outgoing_flow_of_path((end_node, path)) > self.fractional_decomposition_accuracy:
+            chosen_path = path
 
-            if chosen_path is not None:
-                break
-
-        if self.paper_mode and chosen_path is None:
-            self.logger.error("ERROR: Couldn't determine a branch to start the decomposition ...")
+        if chosen_path is None:
+            self.logger.warning("WARNING: Couldn't determine a branch to start the decomposition ...")
             self._abort_decomposition_based_on_numerical_trouble = True
         return chosen_path
+
+
+        # chosen_path = None
+        # # Iterate over the branch copies corresponding to different target node mappings
+        # for end_node, path in branch.iteritems():
+        #
+        #     ext_source = ext_graph.source_nodes[path.start_node][mapping.mapping_nodes[path.start_node]]
+        #     # print "shit starting now..."
+        #     for eedge in ext_graph.out_edges[ext_source]:
+        #         # print "ext_source is {}".format(ext_source)
+        #         ee_tail, ee_head = eedge
+        #         # print ee_tail, ee_head
+        #
+        #         if ee_head in path.extended_nodes:
+        #             # print "identified {} as correctly belonging to {} (this doesn't really make sense)".format(eedge, ext_source)
+        #             if self.flow_values["edge"].get(eedge, 0.0) - self._used_flow["edge"].get(eedge, 0.0) > self.fractional_decomposition_accuracy:
+        #                 # print "choosing path ... because of this edge!"
+        #                 chosen_path = path
+        #                 break
+        #
+        #     if chosen_path is not None:
+        #         break
+        #
+        # if self.paper_mode and chosen_path is None:
+        #     self.logger.error("ERROR: Couldn't determine a branch to start the decomposition ...")
+        #     self._abort_decomposition_based_on_numerical_trouble = True
+        # return chosen_path
 
     def _choose_flow_path_in_extended_path(self, path, mapping, sink_nodes=None):
         # if a sink node is specified, we search the extended graph until that node is reached. Otherwise, all sink nodes are viable:
@@ -908,11 +1228,10 @@ class Decomposition(object):
                     stack.append(ee_head)
                     predecessor[ee_head] = ee_tail
         if sink is None:
-            if self.paper_mode:
-                self.logger.error("ERROR: Couldn't find a path in the decomposition process")
-                return None, None
-            else:
-                raise CactusDecompositionError("Sanity Check: Path search did not reach the intended sink node")
+            self._abort_decomposition_based_on_numerical_trouble = True
+            self.logger.error("ERROR: Couldn't find a path in the decomposition process")
+            return None, None
+
 
         eedge_path = Decomposition._dfs_assemble_path_from_predecessor_dictionary(predecessor, ext_source, sink)
         for edge in eedge_path:
