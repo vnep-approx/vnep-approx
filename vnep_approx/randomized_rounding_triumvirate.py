@@ -99,8 +99,8 @@ class RandomizedRoundingTriumvirate(object):
                                                                                  gurobi_settings=gurobi_settings,
                                                                                  logger=logger,
                                                                                  lp_output_file=lp_output_file,
-                                                                                 decomposition_abortion_epsilon=decomposition_abortion_epsilon,
-                                                                                 decomposition_epsilon=decomposition_epsilon)
+                                                                                 decomposition_abortion_epsilon=float(decomposition_abortion_epsilon),  #conversion to float if parameter was given as string
+                                                                                 decomposition_epsilon=float(decomposition_epsilon))                    #conversion to float if parameter was given as string
         self.temporal_log = self.mc.temporal_log
         self._fractional_solution = None
         self.solution = None

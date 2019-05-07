@@ -523,11 +523,12 @@ class ModelCreatorCactusDecomposition(modelcreator.AbstractEmbeddingModelCreator
                               substrate_resources=self.substrate.substrate_resources,  # TODO: this is redundant, we could rewrite the Decomposition so that it receives a substrateX
                               logger=self.logger)
 
-            d.logger = None
-            with open(self.scenario.name + "_decomp_task_" + str(req_index) + ".pickle", "w") as f:
-                pickle.dump(d, f)
 
-            d.logger=self.logger
+            if self.pickle_decomposition_tasks:
+                d.logger = None
+                with open(self.scenario.name + "_decomp_task_" + str(req_index) + ".pickle", "w") as f:
+                    pickle.dump(d, f)
+                d.logger=self.logger
 
             mapping_flow_load_list = d.compute_mappings()
             self.lost_flow_in_the_decomposition += d.lost_flow_in_the_decomposition
@@ -767,7 +768,7 @@ class Decomposition(object):
     def compute_mappings(self):
         result = []
         self._mapping_count = 0
-        self.logger.info("\n\n\n")
+        self.logger.info("\n")
         while (self.flow_values["embedding"]) > self.decomposition_abortion_epsilon:
             if self._abort_decomposition_based_on_numerical_trouble:
                 break
@@ -791,10 +792,10 @@ class Decomposition(object):
                     min(self.flow_values["edge"][eedge] for eedge in self._used_ext_graph_edge_resources)
                 )
                 if flow < 0:
-                    self.logger.error("Flow should never be negative! {}".format(flow))
+                    self.logger.error("Decomposition Termination: Flow should never be negative! {}".format(flow))
                     self._abort_decomposition_based_on_numerical_trouble = True
                     break
-                # self.logger.info("Min is {}".format(flow))
+                self.logger.info("Extracted mapping has flow {}".format(flow))
                 self.flow_values["embedding"] -= flow
                 for eedge in self._used_ext_graph_edge_resources:
                     self.flow_values["edge"][eedge] -= flow
@@ -805,9 +806,14 @@ class Decomposition(object):
                 result.append((mapping, flow, load))
         remaining_flow = self.flow_values["embedding"]
         self.lost_flow_in_the_decomposition += remaining_flow
-        self.logger.error("ERROR: Losing {} amount of flow as the decomposition did not perfectly work.".format(
-            remaining_flow
-        ))
+        if remaining_flow > self.decomposition_abortion_epsilon:
+            self.logger.error("ERROR: Aborted decomposition with {} flow left, which is bigger than the abortion epsilon {}".format(
+                remaining_flow, self.decomposition_abortion_epsilon
+            ))
+        else:
+            self.logger.info("Aborted decomposition with only {} flow left (less than the specified abortion epsilon {})".format(
+                remaining_flow, self.decomposition_abortion_epsilon
+            ))
         return result
 
     def _decomposition_iteration(self):
@@ -872,7 +878,7 @@ class Decomposition(object):
             mapping.map_node(root, u)
             return ext_node
         else:
-            self.logger.warning("WARNING: No valid root mapping found for {}.".format(self.request.name))
+            self.logger.warning("Decomposition Termination: No valid root mapping found for {}.".format(self.request.name))
             self._abort_decomposition_based_on_numerical_trouble = True
             return None
 
@@ -907,7 +913,7 @@ class Decomposition(object):
         if outgoing_flow_of_path((end_node, path)) > self.decomposition_epsilon:
             chosen_path = path
         if chosen_path is None:
-            self.logger.warning("WARNING: Couldn't determine a branch to start the decomposition")
+            self.logger.warning("Decomposition Termination: Couldn't determine a branch to start the decomposition")
             self._abort_decomposition_based_on_numerical_trouble = True
 
         return chosen_path
@@ -953,12 +959,12 @@ class Decomposition(object):
                 ee_head = self._propagating_neighbors.popleft()
                 self._stack.append(ee_head)
                 self._changed_predecessors.append(ee_head)
-                self._predecessor[ee_head] = ee_tail
+                self._predecessor[ee_head] = current_enode
 
 
         if sink is None:
             self._abort_decomposition_based_on_numerical_trouble = True
-            self.logger.error("ERROR: Couldn't find a path in the decomposition process")
+            self.logger.warning("Decomposition Termination: Couldn't find a path in the decomposition process")
             return None, None
 
 
