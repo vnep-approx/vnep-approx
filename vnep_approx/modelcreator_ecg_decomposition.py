@@ -802,8 +802,8 @@ class Decomposition(object):
 
             if self._abort_decomposition_based_on_numerical_trouble:
                 self.lost_flow_in_the_decomposition += flow
-                self.logger.warning("Based on numerical trouble only a partial mapping of value {} was extracted.")
-                self.logger.warning("Trying to continue with {} flow to decompose".format(flow, self.flow_values["embedding"]))
+                self.logger.warning("Based on numerical trouble only a partial mapping of value {} was extracted.".format(flow))
+                self.logger.warning("Trying to continue with {} flow to decompose".format(self.flow_values["embedding"]))
                 self._abort_decomposition_based_on_numerical_trouble = False
             else:
                 #self.logger.info("Extracted mapping has flow {}".format(flow))
