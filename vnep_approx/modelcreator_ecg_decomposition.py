@@ -73,7 +73,7 @@ class ModelCreatorCactusDecomposition(modelcreator.AbstractEmbeddingModelCreator
 
     ALGORITHM_ID = "CactusDecomposition"
 
-    def __init__(self, scenario, gurobi_settings=None, logger=None, lp_output_file=None, pickle_decomposition_tasks=True, decomposition_epsilon=1e-10, decomposition_abortion_epsilon=1e-3):
+    def __init__(self, scenario, gurobi_settings=None, logger=None, lp_output_file=None, pickle_decomposition_tasks=False, decomposition_epsilon=1e-10, decomposition_abortion_epsilon=1e-3):
         super(ModelCreatorCactusDecomposition, self).__init__(scenario=scenario, gurobi_settings=gurobi_settings, logger=logger, lp_output_file=lp_output_file)
 
         self._originally_allowed_nodes = {}
