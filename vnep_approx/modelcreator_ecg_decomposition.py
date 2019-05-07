@@ -828,7 +828,7 @@ class Decomposition(object):
         self.lost_flow_in_the_decomposition += remaining_flow
 
         if initial_flow_value > self.decomposition_abortion_epsilon:
-            self.logger.info("Overall, {}% of the flow was successfully decomposed.".format(100.0*((initial_flow_value - self.lost_flow_in_the_decomposition)/initial_flow_value))
+            self.logger.info("Overall, {}% of the flow was successfully decomposed.".format(100.0*((initial_flow_value - self.lost_flow_in_the_decomposition)/initial_flow_value)))
 
         return result
 
