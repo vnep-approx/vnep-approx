@@ -83,7 +83,7 @@ class RandomizedRoundingTriumvirate(object):
 
     ALGORITHM_ID = "RandomizedRoundingTriumvirate"
 
-    def __init__(self, scenario, gurobi_settings=None, logger=None, number_of_solutions_to_round=1000, mdk_gurobi_parameters=None, write_lp_file_format=None):
+    def __init__(self, scenario, gurobi_settings=None, logger=None, number_of_solutions_to_round=1000, mdk_gurobi_parameters=None, write_lp_file_format=None, decomposition_epsilon=1e-10, decomposition_abortion_epsilon=1e-3):
         self.scenario = scenario
 
 
@@ -98,7 +98,9 @@ class RandomizedRoundingTriumvirate(object):
         self.mc = modelcreator_ecg_decomposition.ModelCreatorCactusDecomposition(self.scenario,
                                                                                  gurobi_settings=gurobi_settings,
                                                                                  logger=logger,
-                                                                                 lp_output_file=lp_output_file)
+                                                                                 lp_output_file=lp_output_file,
+                                                                                 decomposition_abortion_epsilon=decomposition_abortion_epsilon,
+                                                                                 decomposition_epsilon=decomposition_epsilon)
         self.temporal_log = self.mc.temporal_log
         self._fractional_solution = None
         self.solution = None

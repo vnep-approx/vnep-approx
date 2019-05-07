@@ -54,8 +54,18 @@ def start_experiment(experiment_yaml,
                      min_scenario_index, max_scenario_index,
                      concurrent):
     click.echo('Start Experiment')
+    f_start_experiment(experiment_yaml.name,
+                       min_scenario_index,
+                       max_scenario_index,
+                       concurrent)
+
+
+def f_start_experiment(experiment_yaml,
+                       min_scenario_index,
+                       max_scenario_index,
+                       concurrent):
     util.ExperimentPathHandler.initialize()
-    file_basename = os.path.basename(experiment_yaml.name).split(".")[0].lower()
+    file_basename = os.path.basename(experiment_yaml).split(".")[0].lower()
     log_file = os.path.join(util.ExperimentPathHandler.LOG_DIR, "{}_experiment_execution.log".format(file_basename))
     util.initialize_root_logger(log_file)
 
@@ -85,12 +95,12 @@ def start_experiment(experiment_yaml,
         treewidth_model.RandRoundSepLPOptDynVMPCollection.ALGORITHM_ID,
         treewidth_model.RandRoundSepLPOptDynVMPCollection
     )
-
-    run_experiment.run_experiment(
-        experiment_yaml,
-        min_scenario_index, max_scenario_index,
-        concurrent
-    )
+    with open(experiment_yaml, "r") as actual_experiment_yaml:
+        run_experiment.run_experiment(
+            actual_experiment_yaml,
+            min_scenario_index, max_scenario_index,
+            concurrent
+        )
 
 
 if __name__ == '__main__':
