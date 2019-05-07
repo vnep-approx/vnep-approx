@@ -799,6 +799,7 @@ class Decomposition(object):
                 self.flow_values["node"][i][u] -= flow
 
             if self._abort_decomposition_based_on_numerical_trouble:
+                self.lost_flow_in_the_decomposition += flow
                 self.logger.warning("Based on numerical trouble only a partial mapping of value {} was extracted. Trying to continue...".format(flow))
                 self._abort_decomposition_based_on_numerical_trouble = False
             else:
