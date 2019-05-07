@@ -768,8 +768,10 @@ class Decomposition(object):
         result = []
         self._mapping_count = 0
         self.logger.info("\n")
+        self.logger.info(
+        "\t:Starting decomposition for request {} having a total flow of {}".format(self.request.name, self.flow_values["embedding"]))
+        initial_flow_value = self.flow_values["embedding"]
         while (self.flow_values["embedding"]) > self.decomposition_abortion_epsilon:
-            self.logger.info("{}\t:Current undecomposed flow value is {}".format(self.request.name, self.flow_values["embedding"]))
             self._used_ext_graph_edge_resources = set()  # use the request's original root to store the maximal possible flow according to embedding value
             self._used_ext_graph_node_resources = set()
             mapping = self._decomposition_iteration()
@@ -800,23 +802,34 @@ class Decomposition(object):
 
             if self._abort_decomposition_based_on_numerical_trouble:
                 self.lost_flow_in_the_decomposition += flow
-                self.logger.warning("Based on numerical trouble only a partial mapping of value {} was extracted. Trying to continue...".format(flow))
+                self.logger.warning("Based on numerical trouble only a partial mapping of value {} was extracted.")
+                self.logger.warning("Trying to continue with {} flow to decompose".format(flow, self.flow_values["embedding"]))
                 self._abort_decomposition_based_on_numerical_trouble = False
             else:
-                self.logger.info("Extracted mapping has flow {}".format(flow))
+                #self.logger.info("Extracted mapping has flow {}".format(flow))
                 load = self._calculate_substrate_load_for_mapping(mapping)
                 result.append((mapping, flow, load))
 
         remaining_flow = self.flow_values["embedding"]
-        self.lost_flow_in_the_decomposition += remaining_flow
+
         if remaining_flow > self.decomposition_abortion_epsilon:
             self.logger.error("ERROR: Aborted decomposition with {} flow left, which is bigger than the abortion epsilon {}".format(
                 remaining_flow, self.decomposition_abortion_epsilon
             ))
         else:
-            self.logger.info("Aborted decomposition with only {} flow left (less than the specified abortion epsilon {})".format(
-                remaining_flow, self.decomposition_abortion_epsilon
-            ))
+            self.logger.info(
+                "Aborted decomposition with only {} flow left (less than the specified abortion epsilon {})".format(
+                    remaining_flow, self.decomposition_abortion_epsilon
+                ))
+
+        self.logger.info("Given partial mappings of flow {}, the total lost flow is {}.".format(
+            self.lost_flow_in_the_decomposition, self.lost_flow_in_the_decomposition + remaining_flow))
+
+        self.lost_flow_in_the_decomposition += remaining_flow
+
+        if initial_flow_value > self.decomposition_abortion_epsilon:
+            self.logger.info("Overall, {}% of the flow was successfully decomposed.".format(100.0*((initial_flow_value - self.lost_flow_in_the_decomposition)/initial_flow_value))
+
         return result
 
     def _decomposition_iteration(self):
