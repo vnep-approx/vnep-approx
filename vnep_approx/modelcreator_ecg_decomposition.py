@@ -757,7 +757,6 @@ class Decomposition(object):
         self._used_ext_graph_edge_resources = None  # set of edges in the extended graph that are used in a single iteration of the decomposition algorithm
         self._used_ext_graph_node_resources = None  # same for nodes
         self._abort_decomposition_based_on_numerical_trouble = False
-        self._decomposition_could_not_be_extended = False
         self.lost_flow_in_the_decomposition = 0.0
 
         self._predecessor = {node : None for node in self.ext_graph.nodes}
@@ -770,40 +769,43 @@ class Decomposition(object):
         self._mapping_count = 0
         self.logger.info("\n")
         while (self.flow_values["embedding"]) > self.decomposition_abortion_epsilon:
-            if self._abort_decomposition_based_on_numerical_trouble:
-                break
             self.logger.info("{}\t:Current undecomposed flow value is {}".format(self.request.name, self.flow_values["embedding"]))
             self._used_ext_graph_edge_resources = set()  # use the request's original root to store the maximal possible flow according to embedding value
             self._used_ext_graph_node_resources = set()
             mapping = self._decomposition_iteration()
 
-            if not self._abort_decomposition_based_on_numerical_trouble:
-                # diminish the flow on the used edges
-                node_flow_list = []
-                for ext_node in self._used_ext_graph_node_resources:
-                    i, u = self.ext_graph.get_associated_original_resources(ext_node)
-                    value = self.flow_values["node"][i][u]
-                    if value > 0:
-                        node_flow_list.append(value)
+            # diminish the flow on the used edges
+            node_flow_list = []
+            for ext_node in self._used_ext_graph_node_resources:
+                i, u = self.ext_graph.get_associated_original_resources(ext_node)
+                value = self.flow_values["node"][i][u]
+                if value > 0:
+                    node_flow_list.append(value)
 
-                flow = min(
-                    min(node_flow_list),
-                    self.flow_values["embedding"],
-                    min(self.flow_values["edge"][eedge] for eedge in self._used_ext_graph_edge_resources)
-                )
-                if flow < 0:
-                    self.logger.error("Decomposition Termination: Flow should never be negative! {}".format(flow))
-                    self._abort_decomposition_based_on_numerical_trouble = True
-                    break
+            flow = min(
+                min(node_flow_list),
+                self.flow_values["embedding"],
+                min(self.flow_values["edge"][eedge] for eedge in self._used_ext_graph_edge_resources)
+            )
+            if flow < 0:
+                self.logger.error("ERROR: Decomposition Termination: Flow should never be negative! {}".format(flow))
+                break
+
+            self.flow_values["embedding"] -= flow
+            for eedge in self._used_ext_graph_edge_resources:
+                self.flow_values["edge"][eedge] -= flow
+            for enode in self._used_ext_graph_node_resources:
+                i, u = self.ext_graph.get_associated_original_resources(enode)
+                self.flow_values["node"][i][u] -= flow
+
+            if self._abort_decomposition_based_on_numerical_trouble:
+                self.logger.warning("Based on numerical trouble only a partial mapping of value {} was extracted. Trying to continue...".format(flow))
+                self._abort_decomposition_based_on_numerical_trouble = False
+            else:
                 self.logger.info("Extracted mapping has flow {}".format(flow))
-                self.flow_values["embedding"] -= flow
-                for eedge in self._used_ext_graph_edge_resources:
-                    self.flow_values["edge"][eedge] -= flow
-                for enode in self._used_ext_graph_node_resources:
-                    i, u = self.ext_graph.get_associated_original_resources(enode)
-                    self.flow_values["node"][i][u] -= flow
                 load = self._calculate_substrate_load_for_mapping(mapping)
                 result.append((mapping, flow, load))
+
         remaining_flow = self.flow_values["embedding"]
         self.lost_flow_in_the_decomposition += remaining_flow
         if remaining_flow > self.decomposition_abortion_epsilon:
@@ -963,6 +965,11 @@ class Decomposition(object):
 
 
         if sink is None:
+            for node in self.ext_graph.nodes:
+                if self._predecessor[node] != None:
+                    self._used_ext_graph_edge_resources.add((self._predecessor[node], node))
+
+            self._used_ext_graph_node_resources.add(ext_source)
             self._abort_decomposition_based_on_numerical_trouble = True
             self.logger.warning("Decomposition Termination: Couldn't find a path in the decomposition process")
             return None, None
@@ -971,7 +978,9 @@ class Decomposition(object):
         eedge_path = Decomposition._dfs_assemble_path_from_predecessor_dictionary(self._predecessor, ext_source, sink)
         for edge in eedge_path:
             self._used_ext_graph_edge_resources.add(edge)
-            self._used_ext_graph_node_resources.add(sink)
+
+        self._used_ext_graph_node_resources.add(ext_source)
+        self._used_ext_graph_node_resources.add(sink)
         return eedge_path, sink
 
     @staticmethod
