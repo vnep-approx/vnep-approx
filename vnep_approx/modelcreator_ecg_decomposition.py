@@ -782,6 +782,11 @@ class Decomposition(object):
 
     def scale_flow_to_unit_flow(self):
         self.original_embedding_flow_value = self.flow_values["embedding"]
+        if self.original_embedding_flow_value < self.absolute_decomposition_abortion_epsilon:
+            self.logger.info("Performing no scaling in the first place, as the original flow value {} is negligible.".format(self.original_embedding_flow_value))
+            self.inverse_scaling_factor = 1.0
+            self.scaling_factor = 1.0
+            return
         self.inverse_scaling_factor = self.original_embedding_flow_value
         self.scaling_factor = 1.0 / self.original_embedding_flow_value
         if self.scaling_factor > 1.001:
