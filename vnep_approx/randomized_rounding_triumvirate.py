@@ -83,7 +83,7 @@ class RandomizedRoundingTriumvirate(object):
 
     ALGORITHM_ID = "RandomizedRoundingTriumvirate"
 
-    def __init__(self, scenario, gurobi_settings=None, logger=None, number_of_solutions_to_round=1000, mdk_gurobi_parameters=None, write_lp_file_format=None, decomposition_epsilon=1e-10, decomposition_abortion_epsilon=1e-3):
+    def __init__(self, scenario, gurobi_settings=None, logger=None, number_of_solutions_to_round=1000, mdk_gurobi_parameters=None, write_lp_file_format=None, decomposition_epsilon=1e-10, relative_decomposition_abortion_epsilon=1e-3, absolute_decomposition_abortion_epsilon=1e-6):
         self.scenario = scenario
 
 
@@ -99,8 +99,11 @@ class RandomizedRoundingTriumvirate(object):
                                                                                  gurobi_settings=gurobi_settings,
                                                                                  logger=logger,
                                                                                  lp_output_file=lp_output_file,
-                                                                                 decomposition_abortion_epsilon=float(decomposition_abortion_epsilon),  #conversion to float if parameter was given as string
-                                                                                 decomposition_epsilon=float(decomposition_epsilon))                    #conversion to float if parameter was given as string
+                                                                                 absolute_decomposition_abortion_epsilon=float(
+                                                                                     absolute_decomposition_abortion_epsilon),
+                                                                                 relative_decomposition_abortion_epsilon=float(
+                                                                                     relative_decomposition_abortion_epsilon),  #conversion to float if parameter was given as string
+                                                                                 decomposition_epsilon=float(decomposition_epsilon))                                      #conversion to float if parameter was given as string
         self.temporal_log = self.mc.temporal_log
         self._fractional_solution = None
         self.solution = None

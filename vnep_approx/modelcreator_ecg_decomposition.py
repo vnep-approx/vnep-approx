@@ -73,7 +73,15 @@ class ModelCreatorCactusDecomposition(modelcreator.AbstractEmbeddingModelCreator
 
     ALGORITHM_ID = "CactusDecomposition"
 
-    def __init__(self, scenario, gurobi_settings=None, logger=None, lp_output_file=None, pickle_decomposition_tasks=False, decomposition_epsilon=1e-10, decomposition_abortion_epsilon=1e-3):
+    def __init__(self,
+                 scenario,
+                 gurobi_settings=None,
+                 logger=None,
+                 lp_output_file=None,
+                 pickle_decomposition_tasks=False,
+                 decomposition_epsilon=1e-10,
+                 absolute_decomposition_abortion_epsilon=1e-6,
+                 relative_decomposition_abortion_epsilon=1e-3):
         super(ModelCreatorCactusDecomposition, self).__init__(scenario=scenario, gurobi_settings=gurobi_settings, logger=logger, lp_output_file=lp_output_file)
 
         self._originally_allowed_nodes = {}
@@ -92,7 +100,8 @@ class ModelCreatorCactusDecomposition(modelcreator.AbstractEmbeddingModelCreator
         self.var_request_load = {}  # l(r, x, y)
 
         self.decomposition_epsilon = decomposition_epsilon
-        self.decomposition_abortion_epsilon = decomposition_abortion_epsilon
+        self.relative_decomposition_abortion_epsilon = relative_decomposition_abortion_epsilon
+        self.absolute_decomposition_abortion_epsilon = absolute_decomposition_abortion_epsilon
         self._start_time_recovering_fractional_solution = None
         self._end_time_recovering_fractional_solution = None
         self.lost_flow_in_the_decomposition = 0.0
@@ -517,7 +526,8 @@ class ModelCreatorCactusDecomposition(modelcreator.AbstractEmbeddingModelCreator
             d = Decomposition(req,
                               self.substrate,
                               flow_values[req.name],
-                              self.decomposition_abortion_epsilon,
+                              self.relative_decomposition_abortion_epsilon,
+                              self.absolute_decomposition_abortion_epsilon,
                               self.decomposition_epsilon,
                               extended_graph=self.extended_graphs[req],
                               substrate_resources=self.substrate.substrate_resources,  # TODO: this is redundant, we could rewrite the Decomposition so that it receives a substrateX
@@ -720,11 +730,13 @@ class ModelCreatorCactusDecomposition(modelcreator.AbstractEmbeddingModelCreator
 
 
 class Decomposition(object):
+
     def __init__(self,
                  req,
                  substrate,
                  flow_values,
-                 decomposition_abortion_epsilon,
+                 relative_decomposition_abortion_epsilon,
+                 absolute_decomposition_abortion_epsilon,
                  decomposition_epsilon,
                  extended_graph=None,  # optional, can be provided by the caller to save time
                  substrate_resources=None,  # optional, can be provided by the caller to save time
@@ -752,7 +764,8 @@ class Decomposition(object):
 
         self._mapping_count = None
 
-        self.decomposition_abortion_epsilon = decomposition_abortion_epsilon
+        self.relative_decomposition_abortion_epsilon = relative_decomposition_abortion_epsilon
+        self.absolute_decomposition_abortion_epsilon = absolute_decomposition_abortion_epsilon
         self.decomposition_epsilon = decomposition_epsilon
         self._used_ext_graph_edge_resources = None  # set of edges in the extended graph that are used in a single iteration of the decomposition algorithm
         self._used_ext_graph_node_resources = None  # same for nodes
@@ -763,6 +776,31 @@ class Decomposition(object):
         self._changed_predecessors = []
         self._stack = []
         self._propagating_neighbors = deque()
+        self.original_embedding_flow_value = None
+        self.scaling_factor = None
+        self.inverse_scaling_factor = None
+
+    def scale_flow_to_unit_flow(self):
+        self.original_embedding_flow_value = self.flow_values["embedding"]
+        self.inverse_scaling_factor = self.original_embedding_flow_value
+        self.scaling_factor = 1.0 / self.original_embedding_flow_value
+        if self.scaling_factor > 1.001:
+            self.logger.info("Scaling all flows for the decomposition by factor {}.".format(self.scaling_factor))
+        else:
+            self.logger.info("Not scaling flows, as the scaling factor {} is negligible.".format(self.scaling_factor))
+            self.scaling_factor = 1.0
+            self.inverse_scaling_factor = 1.0
+            return
+
+        self.flow_values["embedding"] = min(1.0, self.flow_values["embedding"] * self.scaling_factor)
+
+        for vnode in self.flow_values["node"].keys():
+            for snode in self.flow_values["node"][vnode].keys():
+                self.flow_values["node"][vnode][snode] = min(1.0, self.flow_values["node"][vnode][snode] * self.scaling_factor)
+        for eedge in self.flow_values["edge"].keys():
+            self.flow_values["edge"][eedge] = min(1.0, self.flow_values["edge"][eedge] * self.scaling_factor)
+
+
 
     def compute_mappings(self):
         result = []
@@ -770,8 +808,15 @@ class Decomposition(object):
         self.logger.info("\n")
         self.logger.info(
         "\t:Starting decomposition for request {} having a total flow of {}".format(self.request.name, self.flow_values["embedding"]))
+
+
         initial_flow_value = self.flow_values["embedding"]
-        while (self.flow_values["embedding"]) > self.decomposition_abortion_epsilon:
+
+        self.scale_flow_to_unit_flow()
+
+        while self.flow_values["embedding"] > self.relative_decomposition_abortion_epsilon and \
+                self.flow_values["embedding"] * self.inverse_scaling_factor > self.absolute_decomposition_abortion_epsilon:
+
             self._used_ext_graph_edge_resources = set()  # use the request's original root to store the maximal possible flow according to embedding value
             self._used_ext_graph_node_resources = set()
             mapping = self._decomposition_iteration()
@@ -801,34 +846,36 @@ class Decomposition(object):
                 self.flow_values["node"][i][u] -= flow
 
             if self._abort_decomposition_based_on_numerical_trouble:
-                self.lost_flow_in_the_decomposition += flow
+                self.lost_flow_in_the_decomposition += flow * self.inverse_scaling_factor
                 self.logger.warning("Based on numerical trouble only a partial mapping of value {} was extracted.".format(flow))
                 self.logger.warning("Trying to continue with {} flow to decompose".format(self.flow_values["embedding"]))
                 self._abort_decomposition_based_on_numerical_trouble = False
             else:
                 #self.logger.info("Extracted mapping has flow {}".format(flow))
                 load = self._calculate_substrate_load_for_mapping(mapping)
-                result.append((mapping, flow, load))
+                result.append((mapping, flow * self.inverse_scaling_factor, load))
 
         remaining_flow = self.flow_values["embedding"]
 
-        if remaining_flow > self.decomposition_abortion_epsilon:
-            self.logger.error("ERROR: Aborted decomposition with {} flow left, which is bigger than the abortion epsilon {}".format(
-                remaining_flow, self.decomposition_abortion_epsilon
+        if remaining_flow > self.relative_decomposition_abortion_epsilon and remaining_flow * self.inverse_scaling_factor > self.absolute_decomposition_abortion_epsilon:
+            self.logger.error("ERROR: Aborted decomposition with {} flow left, which does not meet relative or absolute termination criterion {}, resp. {}".format(
+                remaining_flow * self.inverse_scaling_factor, self.relative_decomposition_abortion_epsilon, self.absolute_decomposition_abortion_epsilon
             ))
         else:
             self.logger.info(
-                "Aborted decomposition with only {} flow left (less than the specified abortion epsilon {})".format(
-                    remaining_flow, self.decomposition_abortion_epsilon
+                "Aborted decomposition with only {} flow left (either less than the specified relative abortion epsilon {} or the absolute abortion epsilon {})".format(
+                    remaining_flow * self.inverse_scaling_factor, self.relative_decomposition_abortion_epsilon, self.absolute_decomposition_abortion_epsilon
                 ))
 
         self.logger.info("Given partial mappings of flow {}, the total lost flow is {}.".format(
-            self.lost_flow_in_the_decomposition, self.lost_flow_in_the_decomposition + remaining_flow))
+            self.lost_flow_in_the_decomposition, self.lost_flow_in_the_decomposition + remaining_flow * self.inverse_scaling_factor))
 
-        self.lost_flow_in_the_decomposition += remaining_flow
+        self.lost_flow_in_the_decomposition += remaining_flow * self.inverse_scaling_factor
 
-        if initial_flow_value > self.decomposition_abortion_epsilon:
-            self.logger.info("Overall, {}% of the flow was successfully decomposed.".format(100.0*((initial_flow_value - self.lost_flow_in_the_decomposition)/initial_flow_value)))
+        if self.original_embedding_flow_value > self.absolute_decomposition_abortion_epsilon:
+            self.logger.info("Overall, {}% of the flow was successfully decomposed.".format(100.0*((self.original_embedding_flow_value - self.lost_flow_in_the_decomposition)/self.original_embedding_flow_value)))
+        else:
+            self.logger.info("Due to the negligible initial flow ({}), no percentage of lost flow is given.".format(self.original_embedding_flow_value))
 
         return result
 
