@@ -30,11 +30,18 @@ from alib import run_experiment, util
 from . import modelcreator_ecg_decomposition, randomized_rounding_triumvirate
 from . import treewidth_model
 from . import vine
+import logging
+
 
 
 @click.group()
 def cli():
     pass
+
+def initialize_logger(filename, log_level_print, log_level_file, allow_override=False):
+    log_level_print = logging._levelNames[log_level_print.upper()]
+    log_level_file = logging._levelNames[log_level_file.upper()]
+    util.initialize_root_logger(filename, log_level_print, log_level_file, allow_override=allow_override)
 
 
 @cli.command()
@@ -46,28 +53,53 @@ def generate_scenarios(scenario_output_file, parameters, threads):
 
 
 @cli.command()
-@click.argument('experiment_yaml', type=click.File('r'))
-@click.argument('min_scenario_index', type=click.INT)
-@click.argument('max_scenario_index', type=click.INT)
-@click.option('--concurrent', default=1)
+@click.argument('experiment_yaml', type=click.File('r'), help="the experiment yaml detailing the input as well as the algorithms to be executed")
+@click.argument('min_scenario_index', type=click.INT, help="minimum (numeric) scenario id to be executed")
+@click.argument('max_scenario_index', type=click.INT, help="maximum (numeric) scenario id to be executed")
+@click.option('--concurrent', default=1, help="number of processes to be used in parallel")
+@click.option('--log_level_print', type=click.STRING, default="info", help="log level for stdout")
+@click.option('--log_level_file', type=click.STRING, default="debug", help="log level for log file")
+@click.option('--shuffle_instances/--original_order', default=True, help="shall instances be shuffled or ordered according to their ids (ascendingly)")
+@click.option('--overwrite_existing_temporary_scenarios/--use_existing_temporary_scenarios', default=False, help="shall existing temporary scenario files be overwritten or used?")
+@click.option('--overwrite_existing_intermediate_solutions/--use_existing_intermediate_solutions', default=False, help="shall existing intermediate solution files be overwritten or used?")
 def start_experiment(experiment_yaml,
-                     min_scenario_index, max_scenario_index,
-                     concurrent):
+                     min_scenario_index,
+                     max_scenario_index,
+                     concurrent,
+                     log_level_print,
+                     log_level_file,
+                     shuffle_instances,
+                     overwrite_existing_temporary_scenarios,
+                     overwrite_existing_intermediate_solutions,
+                     ):
     click.echo('Start Experiment')
     f_start_experiment(experiment_yaml.name,
                        min_scenario_index,
                        max_scenario_index,
-                       concurrent)
+                       concurrent,
+                       log_level_print,
+                       log_level_file,
+                       shuffle_instances,
+                       overwrite_existing_temporary_scenarios,
+                       overwrite_existing_intermediate_solutions
+                       )
 
 
 def f_start_experiment(experiment_yaml,
                        min_scenario_index,
                        max_scenario_index,
-                       concurrent):
+                       concurrent,
+                       log_level_print,
+                       log_level_file,
+                       shuffle_instances=True,
+                       overwrite_existing_temporary_scenarios=False,
+                       overwrite_existing_intermediate_solutions=False
+                       ):
     util.ExperimentPathHandler.initialize()
     file_basename = os.path.basename(experiment_yaml).split(".")[0].lower()
     log_file = os.path.join(util.ExperimentPathHandler.LOG_DIR, "{}_experiment_execution.log".format(file_basename))
-    util.initialize_root_logger(log_file)
+
+    initialize_logger(log_file, log_level_print, log_level_file)
 
     run_experiment.register_algorithm(
         modelcreator_ecg_decomposition.ModelCreatorCactusDecomposition.ALGORITHM_ID,
@@ -98,8 +130,12 @@ def f_start_experiment(experiment_yaml,
     with open(experiment_yaml, "r") as actual_experiment_yaml:
         run_experiment.run_experiment(
             actual_experiment_yaml,
-            min_scenario_index, max_scenario_index,
-            concurrent
+            min_scenario_index,
+            max_scenario_index,
+            concurrent,
+            shuffle_instances,
+            overwrite_existing_temporary_scenarios,
+            overwrite_existing_intermediate_solutions
         )
 
 
