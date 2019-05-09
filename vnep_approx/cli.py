@@ -53,9 +53,9 @@ def generate_scenarios(scenario_output_file, parameters, threads):
 
 
 @cli.command()
-@click.argument('experiment_yaml', type=click.File('r'), help="the experiment yaml detailing the input as well as the algorithms to be executed")
-@click.argument('min_scenario_index', type=click.INT, help="minimum (numeric) scenario id to be executed")
-@click.argument('max_scenario_index', type=click.INT, help="maximum (numeric) scenario id to be executed")
+@click.argument('experiment_yaml', type=click.File('r'))
+@click.argument('min_scenario_index', type=click.INT)
+@click.argument('max_scenario_index', type=click.INT)
 @click.option('--concurrent', default=1, help="number of processes to be used in parallel")
 @click.option('--log_level_print', type=click.STRING, default="info", help="log level for stdout")
 @click.option('--log_level_file', type=click.STRING, default="debug", help="log level for log file")
