@@ -62,6 +62,8 @@ def generate_scenarios(scenario_output_file, parameters, threads):
 @click.option('--shuffle_instances/--original_order', default=True, help="shall instances be shuffled or ordered according to their ids (ascendingly)")
 @click.option('--overwrite_existing_temporary_scenarios/--use_existing_temporary_scenarios', default=False, help="shall existing temporary scenario files be overwritten or used?")
 @click.option('--overwrite_existing_intermediate_solutions/--use_existing_intermediate_solutions', default=False, help="shall existing intermediate solution files be overwritten or used?")
+@click.option('--remove_temporary_scenarios/--keep_temporary_scenarios', is_flag=True, default=False, help="shall temporary scenario files be removed after execution?")
+@click.option('--remove_intermediate_solutions/--keep_intermediate_solutions', is_flag=True, default=False, help="shall intermediate solutions be removed after execution?")
 def start_experiment(experiment_yaml,
                      min_scenario_index,
                      max_scenario_index,
@@ -71,6 +73,8 @@ def start_experiment(experiment_yaml,
                      shuffle_instances,
                      overwrite_existing_temporary_scenarios,
                      overwrite_existing_intermediate_solutions,
+                     remove_temporary_scenarios,
+                     remove_intermediate_solutions
                      ):
     click.echo('Start Experiment')
     f_start_experiment(experiment_yaml.name,
@@ -81,7 +85,9 @@ def start_experiment(experiment_yaml,
                        log_level_file,
                        shuffle_instances,
                        overwrite_existing_temporary_scenarios,
-                       overwrite_existing_intermediate_solutions
+                       overwrite_existing_intermediate_solutions,
+                       remove_temporary_scenarios,
+                       remove_intermediate_solutions
                        )
 
 
@@ -93,7 +99,9 @@ def f_start_experiment(experiment_yaml,
                        log_level_file,
                        shuffle_instances=True,
                        overwrite_existing_temporary_scenarios=False,
-                       overwrite_existing_intermediate_solutions=False
+                       overwrite_existing_intermediate_solutions=False,
+                       remove_temporary_scenarios=False,
+                       remove_intermediate_solutions=False
                        ):
     util.ExperimentPathHandler.initialize()
     file_basename = os.path.basename(experiment_yaml).split(".")[0].lower()
@@ -135,7 +143,9 @@ def f_start_experiment(experiment_yaml,
             concurrent,
             shuffle_instances,
             overwrite_existing_temporary_scenarios,
-            overwrite_existing_intermediate_solutions
+            overwrite_existing_intermediate_solutions,
+            remove_temporary_scenarios,
+            remove_intermediate_solutions
         )
 
 
