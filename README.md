@@ -16,9 +16,11 @@ This randomized rounding procedure actually executed three different kinds of he
   exceed resource capacities. Accordingly: this heuristic always yields feasible solutions (see [2]).
   - **Multi-dimensional knapsack (MDK)**: given the decomposition into convex combinations of valid mappings for each request,
   the MDK computes the optimal rounding given all mapping possibilities found.
-  
-Note that our separate Github Repository [evaluation-ifip-networking-2018](https://github.com/vnep-approx/evaluation-ifip-networking-2018)
-provides more explanation on how to generate scenarios and apply algorithms. 
+- An implementation of randomized rounding based on a column generation / separation LP approach presented in [5]: using the DynVMP algorithm valid mappings are priced into the LP, where the runtime of DynVMP is polynomial in the input size and exponential in the **tree width** of the request graphs. All code pertaining to this approach can be found in the **[treewidth_model.py](vnep_approx/treewidth_model.py)**.
+- An implementation of the ViNE online heuristics and their offline counterpart WiNE: **[vine.py](vnep_approx/vine.py)** 
+   
+Note that our separate Github repositories [evaluation-ifip-networking-2018](https://github.com/vnep-approx/evaluation-ifip-networking-2018) and [evaluation-acm-ccr-2019](https://github.com/vnep-approx/evaluation-acm-ccr-2019)
+provide more explanatiosn on how to generate scenarios and apply algorithms. 
 
 ## Papers
 
@@ -30,10 +32,13 @@ provides more explanation on how to generate scenarios and apply algorithms.
 
 **[4]** Guy Even, Matthias Rost, Stefan Schmid: An Approximation Algorithm for Path Computation and Function Placement in SDNs. [SIROCCO 2016: 374-390](https://link.springer.com/chapter/10.1007%2F978-3-319-48314-6_24)
 
+**[5]** Matthias Rost, Elias Döhne, Stefan Schmid: Parametrized Complexity of Virtual Network Embeddings: Dynamic & Linear Programming Approximations. [ACM CCR January 2019](https://ccronline.sigcomm.org/wp-content/uploads/2019/02/sigcomm-ccr-final255.pdf)
+
 # Dependencies and Requirements
 
-The **vnep_approx** library requires Python 2.7. Required python libraries: gurobipy, numpy, cPickle, networkx 1.9, matplotlib, and **[alib](https://github.com/vnep-approx/alib)**. 
+The **vnep_approx** library requires Python 2.7. Required python libraries are gurobipy, numpy, cPickle, networkx, matplotlib, **[alib](https://github.com/vnep-approx/alib)**, **[vnep-approx](https://github.com/vnep-approx/vnep-approx)**-
 
+Furthermore, we use Tamaki's algorithm presented in his [paper at ESA 2017](http://drops.dagstuhl.de/opus/volltexte/2017/7880/pdf/LIPIcs-ESA-2017-68.pdf) to compute tree decompositions (efficiently). The corresponding GitHub repository [TCS-Meiji/PACE2017-TrackA](https://github.com/TCS-Meiji/PACE2017-TrackA) must be cloned locally and the environment variable **PACE_TD_ALGORITHM_PATH** must be set to point the location of the repository: PACE_TD_ALGORITHM_PATH="$PATH_TO_PACE/PACE2017-TrackA".
 Gurobi must be installed and the .../gurobi64/lib directory added to the environment variable LD_LIBRARY_PATH.
 
 For generating and executing (etc.) experiments, the environment variable ALIB_EXPERIMENT_HOME must be set to a path,
