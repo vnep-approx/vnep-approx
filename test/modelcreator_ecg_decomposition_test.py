@@ -265,6 +265,8 @@ class TestCactusModelCreator:
         for req in usable_requests:
             mcf_mapping = sol_mcf.request_mapping[req]
             ecg_mapping = sol_ecg_fixed_mapping.get_solution().request_mapping[req]
+            print mcf_mapping.mapping_nodes
+            print ecg_mapping.mapping_nodes
             assert mcf_mapping.mapping_nodes == ecg_mapping.mapping_nodes
             assert mcf_mapping.mapping_edges == ecg_mapping.mapping_edges
 
@@ -402,7 +404,7 @@ class TestDecomposition:
                 key=lambda expected: abs(expected - flow)
             )
             expected_flow_values.remove(best_matching_value)
-            assert flow == pytest.approx(best_matching_value)
+            assert flow == pytest.approx(best_matching_value, rel=0.001)
 
     def test_handmade_example_containing_multiple_mappings(self):
         req = datamodel.Request("test_req")

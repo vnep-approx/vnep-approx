@@ -81,8 +81,8 @@ class CommutativityModelCreator(modelcreator.AbstractEmbeddingModelCreator):
         self._used_flow_node_mapping = None
         self._used_flow_embedding_decision = {req: 0.0 for req in self.requests}
 
-        self.fractional_decomposition_accuracy = 0.0001
-        self.fractional_decomposition_abortion_flow = 0.001
+        self.decomposition_epsilon = 0.0001
+        self.decomposition_abortion_epsilon = 0.001
         self._start_time_recovering_fractional_solution = None
         self._end_time_recovering_fractional_solution = None
         self.lost_flow_in_the_decomposition = 0.0
@@ -438,7 +438,7 @@ class CommutativityModelCreator(modelcreator.AbstractEmbeddingModelCreator):
         )
         for req, mapping_list in frac_sol.request_mapping.items():
             for m in mapping_list:
-                if abs(1.0 - frac_sol.mapping_flows[m.name]) < self.fractional_decomposition_accuracy:
+                if abs(1.0 - frac_sol.mapping_flows[m.name]) < self.decomposition_epsilon:
                     self.solution.add_mapping(req, m)
                     break
         return self.solution
@@ -460,7 +460,7 @@ class CommutativityModelCreator(modelcreator.AbstractEmbeddingModelCreator):
             labels = self.request_labels[req]
             mapping_count = 1
 
-            while self.var_embedding_decision[req].x - self._used_flow_embedding_decision[req] > self.fractional_decomposition_abortion_flow:
+            while self.var_embedding_decision[req].x - self._used_flow_embedding_decision[req] > self.decomposition_abortion_epsilon:
                 mapping, mapping_flow = self.extract_request_mapping(req, labels, mapping_count)
                 mapping_count += 1
                 self.reduce_flow(mapping, mapping_flow)
@@ -494,7 +494,7 @@ class CommutativityModelCreator(modelcreator.AbstractEmbeddingModelCreator):
         u_root_candidates = self.var_node_mapping[req][root].keys()
         for u in u_root_candidates:
             for comm_index, var in self.var_node_mapping[req][root][u].iteritems():
-                if var.x - self._used_flow_node_mapping[req][root][u][comm_index] > self.fractional_decomposition_accuracy:
+                if var.x - self._used_flow_node_mapping[req][root][u][comm_index] > self.decomposition_epsilon:
                     mapping.map_node(root, u)
                     break
             if root in mapping.mapping_nodes:
@@ -505,7 +505,7 @@ class CommutativityModelCreator(modelcreator.AbstractEmbeddingModelCreator):
             u = mapping.mapping_nodes[i]
             for comm_index, var in self.var_node_mapping[req][i][u].iteritems():
                 i_mapping_remaining_flow = var.x - self._used_flow_node_mapping[req][i][u][comm_index]
-                if i_mapping_remaining_flow <= self.fractional_decomposition_accuracy:
+                if i_mapping_remaining_flow <= self.decomposition_epsilon:
                     continue
 
                 bag_key = {k for k, v in comm_index}

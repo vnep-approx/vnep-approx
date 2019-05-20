@@ -27,6 +27,13 @@ from gurobipy import GRB, LinExpr
 
 from alib import solutions, util, modelcreator, datamodel
 from . import extendedcactusgraph
+from collections import deque
+
+try:
+    import cPickle as pickle
+except ImportError:
+    import pickle
+
 
 
 class CactusDecompositionError(Exception): pass
@@ -66,8 +73,16 @@ class ModelCreatorCactusDecomposition(modelcreator.AbstractEmbeddingModelCreator
 
     ALGORITHM_ID = "CactusDecomposition"
 
-    def __init__(self, scenario, gurobi_settings=None, logger=None):
-        super(ModelCreatorCactusDecomposition, self).__init__(scenario=scenario, gurobi_settings=gurobi_settings, logger=logger)
+    def __init__(self,
+                 scenario,
+                 gurobi_settings=None,
+                 logger=None,
+                 lp_output_file=None,
+                 pickle_decomposition_tasks=False,
+                 decomposition_epsilon=1e-10,
+                 absolute_decomposition_abortion_epsilon=1e-6,
+                 relative_decomposition_abortion_epsilon=1e-3):
+        super(ModelCreatorCactusDecomposition, self).__init__(scenario=scenario, gurobi_settings=gurobi_settings, logger=logger, lp_output_file=lp_output_file)
 
         self._originally_allowed_nodes = {}
         self.extended_graphs = {}
@@ -84,17 +99,15 @@ class ModelCreatorCactusDecomposition(modelcreator.AbstractEmbeddingModelCreator
         self.var_edge_flow = {}  # f(r, e)
         self.var_request_load = {}  # l(r, x, y)
 
-        # Used in solution extraction:
-        # self._remaining_flow = None  # dictionary storing the remaining on a given extended graph resource during the decomposition algorithm
-        self._used_flow = None
-        self.fractional_decomposition_accuracy = 0.0001
-        self.fractional_decomposition_abortion_flow = 0.001
+        self.decomposition_epsilon = decomposition_epsilon
+        self.relative_decomposition_abortion_epsilon = relative_decomposition_abortion_epsilon
+        self.absolute_decomposition_abortion_epsilon = absolute_decomposition_abortion_epsilon
         self._start_time_recovering_fractional_solution = None
         self._end_time_recovering_fractional_solution = None
         self.lost_flow_in_the_decomposition = 0.0
 
-        # paper mode means that we gracefully accept failures while logging them!
-        self.paper_mode = True
+        self.pickle_decomposition_tasks = pickle_decomposition_tasks
+
 
     def preprocess_input(self):
         modelcreator.AbstractEmbeddingModelCreator.preprocess_input(self)
@@ -514,17 +527,26 @@ class ModelCreatorCactusDecomposition(modelcreator.AbstractEmbeddingModelCreator
             "{}_fractional_solution".format(self.scenario.name),
             self.scenario
         )
-        for req in self.requests:
+        for req_index, req in enumerate(self.requests):
             d = Decomposition(req,
                               self.substrate,
                               flow_values[req.name],
-                              self.fractional_decomposition_abortion_flow,
-                              self.fractional_decomposition_accuracy,
+                              self.relative_decomposition_abortion_epsilon,
+                              self.absolute_decomposition_abortion_epsilon,
+                              self.decomposition_epsilon,
                               extended_graph=self.extended_graphs[req],
                               substrate_resources=self.substrate.substrate_resources,  # TODO: this is redundant, we could rewrite the Decomposition so that it receives a substrateX
                               logger=self.logger)
+
+
+            if self.pickle_decomposition_tasks:
+                d.logger = None
+                with open(self.scenario.name + "_decomp_task_" + str(req_index) + ".pickle", "w") as f:
+                    pickle.dump(d, f)
+                d.logger=self.logger
+
             mapping_flow_load_list = d.compute_mappings()
-            self.lost_flow_in_the_decomposition = d.lost_flow_in_the_decomposition
+            self.lost_flow_in_the_decomposition += d.lost_flow_in_the_decomposition
             for mapping, flow, load in mapping_flow_load_list:
                 self.solution.add_mapping(req, mapping, flow, load)
 
@@ -568,11 +590,11 @@ class ModelCreatorCactusDecomposition(modelcreator.AbstractEmbeddingModelCreator
             result[req.name] = {
                 "embedding": self.var_embedding_decision[req].X,
                 "node": {
-                    i: {u: var.X for (u, var) in u_var_dict.iteritems() if var.X != 0.0}
+                    i: {u: var.X for (u, var) in u_var_dict.iteritems() if var.X > self.decomposition_epsilon}
                     for (i, u_var_dict) in self.var_node_flow[req].iteritems()
                 },
                 "edge": {
-                    ext_edge: var.X for (ext_edge, var) in self.var_edge_flow[req].iteritems() if var.X != 0.0
+                    ext_edge: var.X for (ext_edge, var) in self.var_edge_flow[req].iteritems() if var.X > self.decomposition_epsilon
                 }
             }
         return result
@@ -713,12 +735,14 @@ class ModelCreatorCactusDecomposition(modelcreator.AbstractEmbeddingModelCreator
 
 
 class Decomposition(object):
+
     def __init__(self,
                  req,
                  substrate,
                  flow_values,
-                 fractional_decomposition_abortion_flow,
-                 fractional_decomposition_accuracy,
+                 relative_decomposition_abortion_epsilon,
+                 absolute_decomposition_abortion_epsilon,
+                 decomposition_epsilon,
                  extended_graph=None,  # optional, can be provided by the caller to save time
                  substrate_resources=None,  # optional, can be provided by the caller to save time
                  logger=None):
@@ -738,63 +762,131 @@ class Decomposition(object):
 
         self.flow_values = flow_values
 
-        self.paper_mode = True
-
         self.request = req
         if extended_graph is None:
             extended_graph = extendedcactusgraph.ExtendedCactusGraph(req, self.substrate)
         self.ext_graph = extended_graph
 
         self._mapping_count = None
-        self._used_flow = None
 
-        self.fractional_decomposition_abortion_flow = fractional_decomposition_abortion_flow
-        self.fractional_decomposition_accuracy = fractional_decomposition_accuracy
+        self.relative_decomposition_abortion_epsilon = relative_decomposition_abortion_epsilon
+        self.absolute_decomposition_abortion_epsilon = absolute_decomposition_abortion_epsilon
+        self.decomposition_epsilon = decomposition_epsilon
         self._used_ext_graph_edge_resources = None  # set of edges in the extended graph that are used in a single iteration of the decomposition algorithm
         self._used_ext_graph_node_resources = None  # same for nodes
         self._abort_decomposition_based_on_numerical_trouble = False
         self.lost_flow_in_the_decomposition = 0.0
 
+        self._predecessor = {node : None for node in self.ext_graph.nodes}
+        self._changed_predecessors = []
+        self._stack = []
+        self._propagating_neighbors = deque()
+        self.original_embedding_flow_value = None
+        self.scaling_factor = None
+        self.inverse_scaling_factor = None
+
+    def scale_flow_to_unit_flow(self):
+        self.original_embedding_flow_value = self.flow_values["embedding"]
+        if self.original_embedding_flow_value < self.absolute_decomposition_abortion_epsilon:
+            self.logger.info("Performing no scaling in the first place, as the original flow value {} is negligible.".format(self.original_embedding_flow_value))
+            self.inverse_scaling_factor = 1.0
+            self.scaling_factor = 1.0
+            return
+        self.inverse_scaling_factor = self.original_embedding_flow_value
+        self.scaling_factor = 1.0 / self.original_embedding_flow_value
+        if self.scaling_factor > 1.001:
+            self.logger.info("Scaling all flows for the decomposition by factor {}.".format(self.scaling_factor))
+        else:
+            self.logger.info("Not scaling flows, as the scaling factor {} is negligible.".format(self.scaling_factor))
+            self.scaling_factor = 1.0
+            self.inverse_scaling_factor = 1.0
+            return
+
+        self.flow_values["embedding"] = min(1.0, self.flow_values["embedding"] * self.scaling_factor)
+
+        for vnode in self.flow_values["node"].keys():
+            for snode in self.flow_values["node"][vnode].keys():
+                self.flow_values["node"][vnode][snode] = min(1.0, self.flow_values["node"][vnode][snode] * self.scaling_factor)
+        for eedge in self.flow_values["edge"].keys():
+            self.flow_values["edge"][eedge] = min(1.0, self.flow_values["edge"][eedge] * self.scaling_factor)
+
+
+
     def compute_mappings(self):
         result = []
         self._mapping_count = 0
-        self._used_flow = {"embedding": 0.0, "node": {}, "edge": {}}
-        while (self.flow_values["embedding"] - self._used_flow["embedding"]) > self.fractional_decomposition_abortion_flow:
-            if self._abort_decomposition_based_on_numerical_trouble:
-                return result
+        self.logger.info("\n")
+        self.logger.info(
+        "\t:Starting decomposition for request {} having a total flow of {}".format(self.request.name, self.flow_values["embedding"]))
+
+
+        initial_flow_value = self.flow_values["embedding"]
+
+        self.scale_flow_to_unit_flow()
+
+        while self.flow_values["embedding"] > self.relative_decomposition_abortion_epsilon and \
+                self.flow_values["embedding"] * self.inverse_scaling_factor > self.absolute_decomposition_abortion_epsilon:
+
             self._used_ext_graph_edge_resources = set()  # use the request's original root to store the maximal possible flow according to embedding value
             self._used_ext_graph_node_resources = set()
             mapping = self._decomposition_iteration()
 
-            if not self._abort_decomposition_based_on_numerical_trouble:
-                # diminish the flow on the used edges
-                node_flow_list = []
-                for ext_node in self._used_ext_graph_node_resources:
-                    i, u = self.ext_graph.get_associated_original_resources(ext_node)
-                    node_flow_list.append(
-                        self.flow_values["node"].get(i, {u: 0.0})[u] - self._used_flow["node"].get(ext_node, 0.0)
-                    )
+            # diminish the flow on the used edges
+            node_flow_list = []
+            for ext_node in self._used_ext_graph_node_resources:
+                i, u = self.ext_graph.get_associated_original_resources(ext_node)
+                value = self.flow_values["node"][i][u]
+                if value > 0:
+                    node_flow_list.append(value)
 
-                flow = min(
-                    min(node_flow_list),
-                    self.flow_values["embedding"] - self._used_flow.get("embedding", 0.0),
-                    min(self.flow_values["edge"].get(eedge, 0.0) - self._used_flow["edge"].get(eedge, 0.0) for eedge in self._used_ext_graph_edge_resources)
-                )
-                self._used_flow["embedding"] += flow
-                for eedge in self._used_ext_graph_edge_resources:
-                    self._used_flow["edge"].setdefault(eedge, 0.0)
-                    self._used_flow["edge"][eedge] += flow
-                for enode in self._used_ext_graph_node_resources:
-                    self._used_flow["node"].setdefault(enode, 0.0)
-                    self._used_flow["node"][enode] += flow
+            flow = min(
+                min(node_flow_list),
+                self.flow_values["embedding"],
+                min(self.flow_values["edge"][eedge] for eedge in self._used_ext_graph_edge_resources)
+            )
+            if flow < 0:
+                self.logger.error("ERROR: Decomposition Termination: Flow should never be negative! {}".format(flow))
+                break
+
+            self.flow_values["embedding"] -= flow
+            for eedge in self._used_ext_graph_edge_resources:
+                self.flow_values["edge"][eedge] -= flow
+            for enode in self._used_ext_graph_node_resources:
+                i, u = self.ext_graph.get_associated_original_resources(enode)
+                self.flow_values["node"][i][u] -= flow
+
+            if self._abort_decomposition_based_on_numerical_trouble:
+                self.lost_flow_in_the_decomposition += flow * self.inverse_scaling_factor
+                self.logger.warning("Based on numerical trouble only a partial mapping of value {} was extracted.".format(flow))
+                self.logger.warning("Trying to continue with {} flow to decompose".format(self.flow_values["embedding"]))
+                self._abort_decomposition_based_on_numerical_trouble = False
+            else:
+                #self.logger.info("Extracted mapping has flow {}".format(flow))
                 load = self._calculate_substrate_load_for_mapping(mapping)
-                result.append((mapping, flow, load))
-        remaining_flow = self.flow_values["embedding"] - self._used_flow["embedding"]
-        if remaining_flow > self.fractional_decomposition_accuracy:
-            self.lost_flow_in_the_decomposition += remaining_flow
-            self.logger.error("ERROR: Losing {} amount of flow as the decomposition did not perfectly work.".format(
-                remaining_flow
+                result.append((mapping, flow * self.inverse_scaling_factor, load))
+
+        remaining_flow = self.flow_values["embedding"]
+
+        if remaining_flow > self.relative_decomposition_abortion_epsilon and remaining_flow * self.inverse_scaling_factor > self.absolute_decomposition_abortion_epsilon:
+            self.logger.error("ERROR: Aborted decomposition with {} flow left, which does not meet relative or absolute termination criterion {}, resp. {}".format(
+                remaining_flow * self.inverse_scaling_factor, self.relative_decomposition_abortion_epsilon, self.absolute_decomposition_abortion_epsilon
             ))
+        else:
+            self.logger.info(
+                "Aborted decomposition with only {} flow left (either less than the specified relative abortion epsilon {} or the absolute abortion epsilon {})".format(
+                    remaining_flow * self.inverse_scaling_factor, self.relative_decomposition_abortion_epsilon, self.absolute_decomposition_abortion_epsilon
+                ))
+
+        self.logger.info("Given partial mappings of flow {}, the total lost flow is {}.".format(
+            self.lost_flow_in_the_decomposition, self.lost_flow_in_the_decomposition + remaining_flow * self.inverse_scaling_factor))
+
+        self.lost_flow_in_the_decomposition += remaining_flow * self.inverse_scaling_factor
+
+        if self.original_embedding_flow_value > self.absolute_decomposition_abortion_epsilon:
+            self.logger.info("Overall, {}% of the flow was successfully decomposed.".format(100.0*((self.original_embedding_flow_value - self.lost_flow_in_the_decomposition)/self.original_embedding_flow_value)))
+        else:
+            self.logger.info("Due to the negligible initial flow ({}), no percentage of lost flow is given.".format(self.original_embedding_flow_value))
+
         return result
 
     def _decomposition_iteration(self):
@@ -803,6 +895,9 @@ class Decomposition(object):
         mapping = solutions.Mapping(mapping_name, self.request, self.substrate, True)
 
         ext_root = self._map_root_node_on_node_with_nonzero_flow(mapping)
+        if ext_root is None:
+            self._abort_decomposition_based_on_numerical_trouble = True
+            return None
         self._used_ext_graph_node_resources.add(ext_root)
         queue = {self.ext_graph.root}
         while queue:
@@ -814,11 +909,13 @@ class Decomposition(object):
                 branch_2 = cycle.ext_graph_branches[1]
 
                 flow_path_1, ext_path_1, sink = self._choose_flow_path_in_extended_cycle(branch_1, mapping)
-                if self.paper_mode and flow_path_1 is None:
+                if flow_path_1 is None:
+                    self._abort_decomposition_based_on_numerical_trouble = True
                     break
 
                 flow_path_2, ext_path_2, sink_2 = self._choose_flow_path_in_extended_cycle(branch_2, mapping, sink=sink)
-                if self.paper_mode and flow_path_2 is None:
+                if flow_path_2 is None:
+                    self._abort_decomposition_based_on_numerical_trouble = True
                     break
 
                 if sink_2 != sink:
@@ -828,28 +925,40 @@ class Decomposition(object):
                 self._process_path(ext_path_1, flow_path_1, mapping, queue)
                 self._process_path(ext_path_2, flow_path_2, mapping, queue)
             for ext_path in self.ext_graph.ecg_paths:
-                if self.paper_mode and self._abort_decomposition_based_on_numerical_trouble:
+                if self._abort_decomposition_based_on_numerical_trouble:
                     break
                 if ext_path.start_node != i:
                     continue
                 flow_path, sink = self._choose_flow_path_in_extended_path(ext_path, mapping)
-                self._process_path(ext_path, flow_path, mapping, queue)
+                if flow_path is not None:
+                    self._process_path(ext_path, flow_path, mapping, queue)
+                else:
+                    self._abort_decomposition_based_on_numerical_trouble = True
         return mapping
 
     def _map_root_node_on_node_with_nonzero_flow(self, mapping):
         root = self.ext_graph.root
-        for (u, ext_node) in self.ext_graph.source_nodes[root].iteritems():
-            ext_node_outflow = sum(self.flow_values["edge"].get(eedge, 0.0) - self._used_flow["edge"].get(eedge, 0.0)
-                                   for eedge in self.ext_graph.out_edges[ext_node])
-            if ext_node_outflow > self.fractional_decomposition_accuracy:
-                mapping.map_node(root, u)
-                return ext_node
-        raise CactusDecompositionError("No valid root mapping found for {}.".format(self.request.name))
+        def outgoing_flow_func(value):
+            #print value
+            u, ext_node = value
+            return max(self.flow_values["edge"].get(eedge, 0.0) for eedge in self.ext_graph.out_edges[ext_node])
+
+        u, ext_node = max(self.ext_graph.source_nodes[root].iteritems(), key=outgoing_flow_func)
+
+        ext_node_outflow = outgoing_flow_func((u, ext_node))
+
+        if ext_node_outflow > self.decomposition_epsilon:
+            mapping.map_node(root, u)
+            return ext_node
+        else:
+            self.logger.warning("Decomposition Termination: No valid root mapping found for {}.".format(self.request.name))
+            self._abort_decomposition_based_on_numerical_trouble = True
+            return None
 
     def _choose_flow_path_in_extended_cycle(self, branch, mapping, sink=None):
         if sink is None:  # this is the case for the first processed branch
             ext_path = self._choose_path_for_cycle_branch(branch, self.ext_graph, mapping)
-            if self.paper_mode and ext_path is None:
+            if ext_path is None:
                 self._abort_decomposition_based_on_numerical_trouble = True
                 return None, None, None
             sink_nodes = [sink_node for (last_layer_node, sink_node) in ext_path.extended_path[ext_path.end_node]]
@@ -857,72 +966,92 @@ class Decomposition(object):
             u_sink = self.ext_graph.node[sink]["substrate_node"]
             ext_path = branch[u_sink]
             sink_nodes = [sink]
+
         eedge_path, sink = self._choose_flow_path_in_extended_path(ext_path, mapping, sink_nodes=sink_nodes)
         return eedge_path, ext_path, sink
 
     def _choose_path_for_cycle_branch(self, branch, ext_graph, mapping):
+
         chosen_path = None
         # Iterate over the branch copies corresponding to different target node mappings
-        for end_node, path in branch.iteritems():
-
+        def outgoing_flow_of_path(value):
+            end_node, path = value
             ext_source = ext_graph.source_nodes[path.start_node][mapping.mapping_nodes[path.start_node]]
-            # print "shit starting now..."
-            for eedge in ext_graph.out_edges[ext_source]:
-                # print "ext_source is {}".format(ext_source)
-                ee_tail, ee_head = eedge
-                # print ee_tail, ee_head
+            return max(self.flow_values["edge"].get((eetail, eehead), 0.0)  for (eetail, eehead) in ext_graph.out_edges[ext_source] if eehead in path.extended_nodes)
 
-                if ee_head in path.extended_nodes:
-                    # print "identified {} as correctly belonging to {} (this doesn't really make sense)".format(eedge, ext_source)
-                    if self.flow_values["edge"].get(eedge, 0.0) - self._used_flow["edge"].get(eedge, 0.0) > self.fractional_decomposition_accuracy:
-                        # print "choosing path ... because of this edge!"
-                        chosen_path = path
-                        break
+        #end_node, path = max(branch.iteritems(), key=outgoing_flow_of_path)
+        value_list = [outgoing_flow_of_path((key, value)) for (key, value) in branch.iteritems()]
+        end_node, path = max(branch.iteritems(), key=outgoing_flow_of_path)
 
-            if chosen_path is not None:
-                break
-
-        if self.paper_mode and chosen_path is None:
-            self.logger.error("ERROR: Couldn't determine a branch to start the decomposition ...")
+        if outgoing_flow_of_path((end_node, path)) > self.decomposition_epsilon:
+            chosen_path = path
+        if chosen_path is None:
+            self.logger.warning("Decomposition Termination: Couldn't determine a branch to start the decomposition")
             self._abort_decomposition_based_on_numerical_trouble = True
+
         return chosen_path
+
 
     def _choose_flow_path_in_extended_path(self, path, mapping, sink_nodes=None):
         # if a sink node is specified, we search the extended graph until that node is reached. Otherwise, all sink nodes are viable:
         if sink_nodes is None:
-            sink_nodes = self.ext_graph.sink_nodes[path.end_node].values()
+            sink_nodes =  self.ext_graph.sink_nodes[path.end_node].values()
+            # sink_nodes = [sink for sink in self.ext_graph.sink_nodes[path.end_node].values() if self.flow_values["node"][path.end_node].get(self.ext_graph.get_associated_original_resources(sink)[1], 0.0) >= self.decomposition_epsilon]
+            # self.logger.info("All sink nodes vs. actual sink nodes:\n{}\n{}".format(all_sink_nodes, sink_nodes))
         ext_source = self.ext_graph.source_nodes[path.start_node][mapping.mapping_nodes[path.start_node]]
         # Depth-First Search until we hit one of the viable sinks:
-        predecessor = {enode: None for enode in self.ext_graph.nodes}
-        stack = [ext_source]
+        for node in self._changed_predecessors:
+            self._predecessor[node] = None
+        del self._changed_predecessors[:]
+        del self._stack[:]
+        self._stack.append(ext_source)
+
         sink = None
-        while stack:
-            current_enode = stack.pop()
+        while len(self._stack) > 0:
+            current_enode = self._stack.pop()
             # print "path search, current node:", current_enode
             if current_enode in sink_nodes:
                 sink = current_enode
                 break
+            max_flow = 0.0
             for eedge in self.ext_graph.out_edges[current_enode]:
                 if eedge not in path.extended_edges:
                     continue
                 ee_tail, ee_head = eedge
                 # ignore flow-less edges:
 
-                flow = self.flow_values["edge"].get(eedge, 0.0) - self._used_flow["edge"].get(eedge, 0.0)
-                if flow > self.fractional_decomposition_accuracy and predecessor[ee_head] is None:
-                    stack.append(ee_head)
-                    predecessor[ee_head] = ee_tail
-        if sink is None:
-            if self.paper_mode:
-                self.logger.error("ERROR: Couldn't find a path in the decomposition process")
-                return None, None
-            else:
-                raise CactusDecompositionError("Sanity Check: Path search did not reach the intended sink node")
+                flow = self.flow_values["edge"].get(eedge, 0.0)
+                if flow > self.decomposition_epsilon and self._predecessor[ee_head] is None:
+                    if flow > max_flow:
+                        self._propagating_neighbors.append(ee_head)
+                        max_flow = flow
+                    else:
+                        self._propagating_neighbors.appendleft(ee_head)
 
-        eedge_path = Decomposition._dfs_assemble_path_from_predecessor_dictionary(predecessor, ext_source, sink)
+            while len(self._propagating_neighbors) > 0:
+                ee_head = self._propagating_neighbors.popleft()
+                self._stack.append(ee_head)
+                self._changed_predecessors.append(ee_head)
+                self._predecessor[ee_head] = current_enode
+
+
+        if sink is None:
+            for node in self.ext_graph.nodes:
+                if self._predecessor[node] != None:
+                    self._used_ext_graph_edge_resources.add((self._predecessor[node], node))
+
+            self._used_ext_graph_node_resources.add(ext_source)
+            self._abort_decomposition_based_on_numerical_trouble = True
+            self.logger.warning("Decomposition Termination: Couldn't find a path in the decomposition process")
+            return None, None
+
+
+        eedge_path = Decomposition._dfs_assemble_path_from_predecessor_dictionary(self._predecessor, ext_source, sink)
         for edge in eedge_path:
             self._used_ext_graph_edge_resources.add(edge)
-            self._used_ext_graph_node_resources.add(sink)
+
+        self._used_ext_graph_node_resources.add(ext_source)
+        self._used_ext_graph_node_resources.add(sink)
         return eedge_path, sink
 
     @staticmethod
