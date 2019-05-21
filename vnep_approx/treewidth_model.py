@@ -428,6 +428,12 @@ class ValidMappingRestrictionComputer(object):
         self._process_edge_sets()
 
     def _process_request_node_mapping_restrictions(self):
+        """
+        Calculates the  allowed nodes of each request node respecting node demands (only one-by-one, NOT any cumulative subsets) and
+        substrate node location constraints.
+
+        :return:
+        """
 
         for reqnode in self.request.nodes:
             node_demand = self.request.get_node_demand(reqnode)
@@ -443,6 +449,11 @@ class ValidMappingRestrictionComputer(object):
             self.allowed_nodes[reqnode] = sorted(allowed_nodes)
 
     def _process_request_edge_mapping_restrictions(self):
+        """
+        Calcualtes allowed edges of a request edge based on (single mapping of) edge resource demand and substrate link restrictions.
+
+        :return:
+        """
         for reqedge in self.request.edges:
             edge_demand = self.request.get_edge_demand(reqedge)
             allowed_edges = self.request.get_allowed_edges(reqedge)
@@ -551,6 +562,12 @@ class ShortestValidPathsComputer(object):
         return out_neighbors_with_cost
 
     def _compute_valid_edge_mapping_costs(self):
+        """
+        Runs a Dijkstra's algorithm from each substrate node and calculates the distances using cost as weight function utilizing only
+        valid substrate nodes and edges for the elements of the object's request graph.
+
+        :return:
+        """
 
         for edge_set_index in range(self.number_of_valid_edge_sets):
 
@@ -1059,6 +1076,7 @@ class OptimizedDynVMP(object):
         self._initialize_cost_arrays()
 
         self.dynvmp_tree_nodes = {}
+        # takes the tree decomposition's node and creates a DynVMPNode instance for each of the bags
         for t in self.ssntda.post_order_traversal:
             self.dynvmp_tree_nodes[t] = OptimizedDynVMPNode(self, t)
             self.dynvmp_tree_nodes[t].initialize()
