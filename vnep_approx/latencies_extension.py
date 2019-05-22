@@ -19,11 +19,12 @@ class ShortestValidPathsComputerWithLatencies(object):
         approximately keeping the per-edge-larencies below a given limit.
     '''
 
-    def __init__(self, substrate, request, valid_mapping_restriction_computer, edge_costs):
+    def __init__(self, substrate, valid_mapping_restriction_computer, edge_costs, edge_latencies, epsilon):
         self.substrate = substrate
-        self.request = request
         self.valid_mapping_restriction_computer = valid_mapping_restriction_computer
         self.edge_costs = edge_costs
+        self.edge_latencies = edge_latencies
+        self.epsilon = epsilon
         self.edge_mapping_invalidities = False
 
     def compute(self):
@@ -43,6 +44,11 @@ class ShortestValidPathsComputerWithLatencies(object):
     def recompute_with_new_costs(self, new_edge_costs):
         self.edge_costs = new_edge_costs
         self.compute()
+
+    def recompute_with_new_latencies(self, new_edge_latencies):
+        self.edge_latencies = new_edge_latencies
+        self.compute()
+
 
     def _prepare_numeric_graph(self):
         #prepare and store information on "numeric graph"
@@ -67,7 +73,7 @@ class ShortestValidPathsComputerWithLatencies(object):
                 if sedge in valid_edge_set:
                     _, out_neighbor = sedge
                     num_id_neighbor = self.snode_id_to_num_id[out_neighbor]
-                    neighbor_and_cost_list.append((num_id_neighbor, self.edge_costs[sedge]))
+                    neighbor_and_cost_list.append((num_id_neighbor, self.edge_costs[sedge], self.edge_latencies[sedge]))
 
             out_neighbors_with_cost.append(neighbor_and_cost_list)
 
@@ -77,7 +83,8 @@ class ShortestValidPathsComputerWithLatencies(object):
 
         for edge_set_index in range(self.number_of_valid_edge_sets):
 
-            out_neighbors_with_cost = self._compute_substrate_edge_abstraction_with_integer_nodes(self.edge_set_id_to_edge_set[edge_set_index])
+            out_neighbors_with_cost = self._compute_substrate_edge_abstraction_with_integer_nodes (
+                self.edge_set_id_to_edge_set[edge_set_index])
 
             for num_source_node in range(self.number_of_nodes):
 
@@ -113,175 +120,120 @@ class ShortestValidPathsComputerWithLatencies(object):
             self.valid_sedge_pred[request_edge] = self.valid_sedge_pred[edge_set_id_to_edge_set]
 
 
-def SPPP(substrate, limit, lower, upper, eps, s, t):
-    num_nodes = len(substrate.nodes)
-    S = (lower * eps) / (num_nodes + 1)
+    def _SPPP(self, limit, lower, upper, eps, s, t):
 
-    # TODO: save max value of c_tilde -> use to shrink distances (axis 1)
-    c_tilde = {}
-    for i, e in enumerate(substrate.edges):
-        c_tilde[e] = int(substrate.edge[e][_cost_identifier] / S) + 1
+        S = (lower * eps) / (self.number_of_nodes + 1)
 
-    U_tilde = int(upper / S) + num_nodes + 1
+        # TODO: save max value of c_tilde -> use to shrink distances (axis 1)
+        c_tilde = {}
+        for i, e in enumerate(self.substrate.edges):
+            c_tilde[e] = int(self.substrate.edge[e][_cost_identifier] / S) + 1
 
-    print "U_tilde", U_tilde
+        U_tilde = int(upper / S) + self.number_of_nodes + 1
 
-    distances = np.full((num_nodes, U_tilde+1), float('inf'))
-    distances[s][0] = 0
+        print "U_tilde", U_tilde
 
-    # TODO: build path & costs on the fly
-    # DONE: Save only necessary items (head and latencies should suffice)
-    predecessor_info = [(-1, 0)] * len(substrate.nodes)
+        distances = np.full((self.number_of_nodes, U_tilde+1), float('inf'))
+        distances[s][0] = 0
 
-    for i in range(1, U_tilde+1):
-        for n in substrate.nodes:
-            distances[n][i] = distances[n][i-1]
-            for e in substrate.in_edges[n]:
-                if c_tilde[e] <= i:
-                    u, _ = e
-                    comp_val = substrate.edge[e][_latency_identifier] + distances[u][i - c_tilde[e]]
+        # TODO: build path & costs on the fly
+        # DONE: Save only necessary items (head and latencies should suffice)
+        predecessor_info = [(-1, 0)] * self.number_of_nodes
 
-                    if comp_val < distances[n][i]:
-                        distances[n][i] = comp_val
-                        predecessor_info[n] = (u, substrate.edge[e][_latency_identifier],
-                                               substrate.edge[e][_cost_identifier])
+        for i in range(1, U_tilde+1):
+            for n in self.substrate.nodes:
+                distances[n][i] = distances[n][i-1]
+                for e in self.substrate.in_edges[n]:
+                    if c_tilde[e] <= i:
+                        u, _ = e
+                        comp_val = self.substrate.edge[e][_latency_identifier] + distances[u][i - c_tilde[e]]
 
-        if distances[t][i] <= limit:
-            # retrace path from t to s
-            n = t
-            path = [t]
-            total_latencies = 0
-            total_costs = 0
-            while n != s:
-                (n, lat, cost) = predecessor_info[n]
-                total_latencies += lat
-                total_costs += cost
-                path = [n] + path
+                        if comp_val < distances[n][i]:
+                            distances[n][i] = comp_val
+                            predecessor_info[n] = (u, self.substrate.edge[e][_latency_identifier],
+                                                   self.substrate.edge[e][_cost_identifier])
 
-            print(total_latencies, distances[t][i])
+            if distances[t][i] <= limit:
+                # retrace path from t to s
+                n = t
+                path = [t]
+                total_latencies = 0
+                total_costs = 0
+                while n != s:
+                    (n, lat, cost) = predecessor_info[n]
+                    total_latencies += lat
+                    total_costs += cost
+                    path = [n] + path
 
-            return path, total_latencies, total_costs
+                print(total_latencies, distances[t][i])
 
-    return FAIL
+                return path, total_latencies, total_costs
 
-
-def T(b, graph, limit, s, t):
-    return SPPP(graph, limit, b, b, 1, s, t) is FAIL
+        return FAIL
 
 
-def Hassin(graph, limit, lower, upper, eps, s, t):
-    b_low = lower
-    b_up = math.ceil(upper / 2)
-
-    while b_up / b_low > 2:
-        b = math.sqrt(b_low * b_up)
-        if T(b, graph, limit, s, t):
-            b_low = b
-        else:
-            b_up = b
-
-    return SPPP(graph, limit, b_low, 2 * b_up, eps, s, t)
+    def _T(self, limit, b, s, t):
+        return self._SPPP(limit, b, b, 1, s, t) == FAIL
 
 
-def _sort_edges_distinct(graph):
-    return list(set([graph.edge[x][_cost_identifier] for x in
-                sorted(graph.edges, key=lambda x: graph.edge[x][_cost_identifier])]))
+    def _Hassin(self, limit, lower, upper, eps, s, t):
+        b_low = lower
+        b_up = math.ceil(upper / 2)
+
+        while b_up / b_low > 2:
+            b = math.sqrt(b_low * b_up)
+            if self._T(limit, b, s, t):
+                b_low = b
+            else:
+                b_up = b
+
+        return self._SPPP(limit, b_low, 2 * b_up, eps, s, t)
 
 
-def _shortest_path_latencies(graph, limit, s, t):
-    # TODO: distances is LARGE, consider reusing
-    # TODO: reuse shortest paths!?
-
-    queue = [(0, s)]
-    distances = [float('inf')] * len(graph.nodes)
-    distances[s] = 0
-
-    while queue:
-        costs, node = heappop(queue)
-
-        if node == t:
-            break
-
-        for u, v in graph.out_edges[str(node)]:
-            lat = graph.edge[(u, v)][_latency_identifier]
-            if lat <= limit:  # this is where the induced subgraph G_j comes in
-                if costs + lat < distances[v]:
-                    distances[v] = costs + lat
-                    heappush(queue, (costs + lat, v))
-
-    return distances[t]
+    def _sort_edges_distinct(self):
+        return list(set([self.substrate.edge[x][_cost_identifier] for x in
+                    sorted(self.substrate.edges, key=lambda x: self.substrate.edge[x][_cost_identifier])]))
 
 
-def approx_latencies(graph, limit, eps, s, t):
-    edges_sorted = _sort_edges_distinct(graph)
+    def _shortest_path_latencies(self, limit, s, t):
+        # TODO: distances is LARGE, consider reusing
+        # TODO: reuse shortest paths!?
 
-    l = len(edges_sorted)
+        queue = [(0, s)]
+        distances = [float('inf')] * self.number_of_nodes
+        distances[s] = 0
 
-    low, high = 1, l
+        while queue:
+            costs, node = heappop(queue)
 
-    while low < high-1:
-        j = int((low + high) / 2)
-        # only pass j and edges_sorted, in shortest path: only use edges whose values doesnt exceed c_j
-        if _shortest_path_latencies(graph, edges_sorted[j], s, t) < limit:
-            high = j
-        else:
-            low = j
+            if node == t:
+                break
 
-    lower = edges_sorted[low]
-    upper = lower * len(graph.nodes)
-    return Hassin(graph, limit, lower, upper, eps, s, t)
+            for u, v in self.substrate.out_edges[str(node)]:
+                lat = self.substrate.edge[(u, v)][_latency_identifier]
+                if lat <= limit:  # this is where the induced subgraph G_j comes in
+                    if costs + lat < distances[v]:
+                        distances[v] = costs + lat
+                        heappush(queue, (costs + lat, v))
 
-
-class Graph2:
-    def __init__(self, num_nodes):
-        self.nodes = list(range(num_nodes))
-        self.edges = []
-        self.in_edges = {}
-        self.out_edges = {}
-        self.edge = {}
-
-        for n in self.nodes:
-            self._init_node(n)
-
-    def _init_node(self, node):
-        self.in_edges[node] = []
-        self.out_edges[node] = []
-
-    def add_edge(self, head, tail, **kwargs):
-        new_edge = (head, tail)
-        self.edges.append(new_edge)
-        self.in_edges[tail].append(new_edge)
-        self.out_edges[head].append(new_edge)
-        self.edge[new_edge] = {}
-        for key, value in kwargs.items():
-            self.edge[new_edge][key] = value
+        return distances[t]
 
 
-def _build_example_graph():
-    g = datamodel.Graph("Substrate")
-    for i in xrange(6):
-        g.add_node(i)
-    g.add_edge(0, 1, latency=5, cost=10)
-    g.add_edge(0, 2, latency=2, cost=7)
-    g.add_edge(2, 1, latency=2, cost=13)
-    g.add_edge(1, 3, latency=6, cost=6)
-    g.add_edge(3, 4, latency=3, cost=2)
-    g.add_edge(4, 2, latency=3, cost=30)
-    g.add_edge(5, 2, latency=1, cost=6)
-    g.add_edge(4, 5, latency=4, cost=9)
-    g.add_edge(3, 5, latency=7, cost=12)
-    g.add_edge(2, 4, latency=3, cost=30)
-    return g
+    def approx_latencies(self, limit, eps, s, t):
+        edges_sorted = self._sort_edges_distinct()
 
+        l = len(edges_sorted)
 
-def __test():
-    g = _build_example_graph()
-    print(approx_latencies(g, 17, 0.2, 0, 4))
-    print(approx_latencies(g, 17, 0.10, 0, 5))
+        low, high = 1, l
 
+        while low < high-1:
+            j = int((low + high) / 2)
+            # only pass j and edges_sorted, in shortest path: only use edges whose values doesnt exceed c_j
+            if self._shortest_path_latencies(edges_sorted[j], s, t) < limit:
+                high = j
+            else:
+                low = j
 
-if __name__ == '__main__':
-    __test()
-
-
-# If this comment made it, the push worked
+        lower = edges_sorted[low]
+        upper = lower * self.number_of_nodes
+        return self._Hassin(limit, lower, upper, eps, s, t)
