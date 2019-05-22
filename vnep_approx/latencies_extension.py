@@ -9,9 +9,6 @@ _latency_identifier = "latency"
 _cost_identifier    = "cost"
 
 
-# Lets try this again
-
-
 
 class ShortestValidPathsComputerWithLatencies(object):
 
@@ -172,17 +169,13 @@ class ShortestValidPathsComputerWithLatencies(object):
         return FAIL
 
 
-    def _T(self, limit, b, s, t):
-        return self._SPPP(limit, b, b, 1, s, t) == FAIL
-
-
     def _Hassin(self, limit, lower, upper, eps, s, t):
         b_low = lower
         b_up = math.ceil(upper / 2)
 
         while b_up / b_low > 2:
             b = math.sqrt(b_low * b_up)
-            if self._T(limit, b, s, t):
+            if self._SPPP(limit, b, b, 1, s, t) == FAIL:
                 b_low = b
             else:
                 b_up = b
