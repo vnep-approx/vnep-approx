@@ -1,6 +1,7 @@
 import random
 from alib import scenariogeneration
 from test.treewidth_model.test_data.substrate_test_data import create_test_substrate
+from test.treewidth_model.test_data.request_test_data import create_random_test_request, create_test_request
 from vnep_approx.treewidth_model import ValidMappingRestrictionComputer
 from vnep_approx.latencies_extension import ShortestValidPathsComputerWithLatencies as SVPC
 
@@ -32,7 +33,7 @@ class GraphCreatorAarnet:
         }
 
         self.sub_reader = scenariogeneration.TopologyZooReader()
-        # self.sub = self.sub_reader.read_substrate(self.parameters)
+        self.sub = self.sub_reader.read_substrate(self.parameters)
         self.sub = create_test_substrate()
 
     def _add_latencies(self):
@@ -49,19 +50,29 @@ def run_test():
     lat_pars = {"min_value": 50, "max_value": 400}
     graph_creator = GraphCreatorAarnet(lat_pars)
     sub = graph_creator.sub
+    # req = create_random_test_request(sub, **{"edge_resource_factor": 200})
 
-    edge_costs = {1 for _ in sub.edges}
-    edge_latencies = {get_latency(lat_pars) for _ in sub.edges}
+    req = create_test_request("simple path")
+    req.node["i1"]["allowed_nodes"] = ["u", "v"]
+    req.node["i2"]["allowed_nodes"] = ["w"]
+    req.node["i3"]["allowed_nodes"] = None
 
-
-    vmrc = ValidMappingRestrictionComputer(sub, None)
-
-    svpcwl = SVPC(sub, vmrc, edge_costs, edge_latencies, 0.1)
-
-
-    print svpcwl.approx_latencies(4000, 0.1, '0', '12')
-
+    print req
     print sub
+
+    edge_costs = {e: 1 for e in sub.edges}
+    edge_latencies = {e: get_latency(lat_pars) for e in sub.edges}
+
+    vmrc = ValidMappingRestrictionComputer(sub, req)
+
+    svpcwl = SVPC(sub, vmrc, edge_costs, edge_latencies, 0.1, 4000)
+
+    svpcwl.compute()
+
+    print svpcwl.valid_sedge_costs
+    print svpcwl.valid_sedge_latencies
+    print svpcwl.valid_sedge_pred
+
 
 
 if __name__ == "__main__":
