@@ -66,50 +66,57 @@ class ShortestValidPathsComputerWithLatencies(object):
 
         # TODO: save max value of c_tilde -> use to shrink distances matrix (axis 1)
         c_tilde = {}
-        for i, e in enumerate(self.substrate.edges):
-            c_tilde[e] = int(self.edge_costs[e] / S) + 1
+        max_c_tilde = -1
+        for e in self.substrate.edges:
+            val = int(self.edge_costs[e] / S) + 1
+            c_tilde[e] = val
+            if val > max_c_tilde:
+                max_c_tilde = val
 
         U_tilde = int(upper / S) + self.number_of_nodes + 1
 
-        print "U_tilde", U_tilde
+
+        print "U_tilde:", U_tilde, max_c_tilde, num_source_node, num_target_node, lower, upper
+        # return FAIL
 
         # unfortunately has different size for each call to SPPP - (maybe use submatrix?)
         distances = np.full((self.number_of_nodes, U_tilde+1), np.inf)
         distances[num_source_node][0] = 0
+        self.predecessor[num_source_node] = num_source_node
 
         # TODO: build path & costs on the fly
         # DONE: Save only necessary items (head and latencies should suffice)
         # TODO: get rid of predecessor_info
-        predecessor_info = np.full(self.number_of_nodes, (-1, 0))
+        predecessor_info = self.number_of_nodes * [(-1, 0, 0)]
 
         for i in range(1, U_tilde+1):
             for snode in self.substrate.nodes:
                 n = self.snode_id_to_num_id[snode]
-                print n
                 distances[n][i] = distances[n][i-1]
                 for e in self.substrate.in_edges[snode]:
                     if c_tilde[e] <= i:
                         u, _ = e
-                        comp_val = self.edge_latencies[e] + distances[u][i - c_tilde[e]]
+                        comp_val = self.edge_latencies[e] + distances[self.snode_id_to_num_id[u]][i - c_tilde[e]]
 
                         if comp_val < distances[n][i]:
                             distances[n][i] = comp_val
-                            predecessor_info[n] = (u, self.edge_latencies[e], self.edge_costs[e])
-                            self.predecessor[n] = u
+                            predecessor_info[n] = (self.snode_id_to_num_id[u], self.edge_latencies[e], self.edge_costs[e])
+                            self.predecessor[n] = self.snode_id_to_num_id[u]
 
             if distances[num_target_node][i] <= self.limit:
                 # retrace path from t to s
                 n = num_target_node
-                path = [num_target_node]
+                path = [self.num_id_to_snode_id[num_target_node]]
                 total_latencies = 0
                 total_costs = 0
                 while n != num_source_node:
-                    (n, lat, cost) = predecessor_info[n]
+                    n, lat, cost = predecessor_info[n]
                     total_latencies += lat
                     total_costs += cost
-                    path = [n] + path
+                    path = [self.num_id_to_snode_id[n]] + path
 
-                print(total_latencies, distances[num_target_node][i])
+                if distances[num_target_node][i] != total_latencies:
+                    print ("Equality check failed: dist[t][i] = {}  !=  {} = total_lat".format(distances[num_target_node][i], total_latencies))
 
                 return path, total_latencies, total_costs
 
@@ -125,6 +132,8 @@ class ShortestValidPathsComputerWithLatencies(object):
                 b_low = b
             else:
                 b_up = b
+
+        print "\t\t\t\t", b_low, b_up
 
         return self._SPPP(b_low, 2 * b_up, self.epsilon, num_source_node, num_target_node)
 
@@ -149,7 +158,7 @@ class ShortestValidPathsComputerWithLatencies(object):
                 break
 
             for u, v in self.substrate.out_edges[node]:
-                lat = self.edge_latencies[(u, v)]
+                lat = self.edge_costs[(u, v)]
                 if lat <= limit:  # this is where the induced subgraph G_j comes in
                     if costs + lat < self.temp_distances[v]:
                         self.temp_distances[v] = costs + lat
@@ -182,9 +191,14 @@ class ShortestValidPathsComputerWithLatencies(object):
             for num_source_node in range(self.number_of_nodes):
 
                 for num_target_node in range(self.number_of_nodes):
-                    path, costs, lat = self._approx_latencies(num_source_node, num_target_node)
+                    path, lat, costs = self._approx_latencies(num_source_node, num_target_node)
 
-                    # TODO: what if approx_latenciey returns FAIL
+                    print "from ", self.num_id_to_snode_id[num_source_node], " to", \
+                        self.num_id_to_snode_id[num_target_node], ":\n\t", path, lat, costs
+
+                    print "predecessors:\n", self.predecessor, "\n"
+
+                    # TODO: what if approx_latency returns FAIL
 
                     self.valid_sedge_costs[edge_set_index][(self.num_id_to_snode_id[num_source_node], self.num_id_to_snode_id[num_target_node])] = costs
                     self.valid_sedge_latencies[edge_set_index][(self.num_id_to_snode_id[num_source_node], self.num_id_to_snode_id[num_target_node])] = lat
