@@ -1,5 +1,6 @@
 import random
 import time
+import cPickle as pickle
 
 from alib import datamodel
 from test.treewidth_model.test_data.substrate_test_data import create_test_substrate
@@ -94,26 +95,40 @@ def get_cost():
 
 
 def run_test():
-    lat_pars = {"min_value": 50, "max_value": 400}
-    # graph_creator = GraphCreatorAarnet(lat_pars)
-    # sub = graph_creator.sub
-    # req = create_random_test_request(sub, **{"edge_resource_factor": 200})
 
-    sub = create_large_substrate(10, 0.5)
-    # sub = create_test_substrate()
+    recompute_pars = False
 
-    # req = create_test_request("simple path")
-    # req.node["i1"]["allowed_nodes"] = ["u", "v", "w"]
-    # req.node["i2"]["allowed_nodes"] = ["v", "u", "w"]
-    # req.node["i3"]["allowed_nodes"] = ["u", "w", "v"]
+    # if recompute_pars:
+    #
+    #     # graph_creator = GraphCreatorAarnet(lat_pars)
+    #     # sub = graph_creator.sub
+    #     # req = create_random_test_request(sub, **{"edge_resource_factor": 200})
+    #
+    #     sub = create_large_substrate(8, 0.5)
+    #     # sub = create_test_substrate()
+    #
+    #     # req = create_test_request("simple path")
+    #     # req.node["i1"]["allowed_nodes"] = ["u", "v", "w"]
+    #     # req.node["i2"]["allowed_nodes"] = ["v", "u", "w"]
+    #     # req.node["i3"]["allowed_nodes"] = ["u", "w", "v"]
+    #
+    #     req = create_large_request(0, sub, "dragon 3")
+    #
+    #     lat_pars = {"min_value": 50, "max_value": 400}
+    #     edge_costs = {e: 1.0 for e in sub.edges}
+    #     edge_latencies = {e: get_latency(lat_pars) for e in sub.edges}
+    #     save_resources(sub, req, edge_costs, edge_latencies)
+    # else:
+    #     sub, req, edge_costs, edge_latencies = load_resources()
 
-    req = create_large_request(0, sub, "dragon 2")
+    sub = build_triangle()
+    req = create_test_request("simple path")
+    edge_costs = {("u", "v"): 3, ("v", "w"): 1, ("u", "w"): 5}
+    edge_latencies = {("u", "v"): 20, ("v", "w"): 30, ("u", "w"): 30}
 
     print req
     print sub
 
-    edge_costs = {e: 1.0 for e in sub.edges}
-    edge_latencies = {e: get_latency(lat_pars) for e in sub.edges}
 
     print "edge_latencies: ", edge_latencies
 
@@ -127,13 +142,13 @@ def run_test():
     print "\n\n-- run --"
 
     start_mine = time.time()
-    svpcwl = SVPC(sub, vmrc, edge_costs, edge_latencies, epsilon=0.01, limit=5000000)
+    svpcwl = SVPC(sub, vmrc, edge_costs, edge_latencies, epsilon=0.1, limit=700)
     svpcwl.compute()
     my_time = time.time() - start_mine
 
     print "\n\n--------- mine ----------"
-    # print svpcwl.valid_sedge_costs
-    # print svpcwl.valid_sedge_pred
+    print svpcwl.valid_sedge_costs
+    print svpcwl.valid_sedge_pred
 
     # print "\n", svpcwl.valid_sedge_latencies
     # print edge_latencies
@@ -145,19 +160,58 @@ def run_test():
     his_time = time.time() - start_his
 
 
-    # print svpcwl2.valid_sedge_costs
-    # print svpcwl2.valid_sedge_pred
+    print svpcwl2.valid_sedge_costs
+    print svpcwl2.valid_sedge_pred
 
 
     print "\n\n--------- sum ----------"
 
-    print "costs equal: \t", svpcwl.valid_sedge_costs == svpcwl2.valid_sedge_costs
-    print "preds equal:\t", svpcwl.valid_sedge_pred == svpcwl2.valid_sedge_pred
+    print "costs equal: \t", cmp(svpcwl.valid_sedge_costs, svpcwl2.valid_sedge_costs) == 0
+    print "preds equal:\t", cmp(svpcwl.valid_sedge_pred, svpcwl2.valid_sedge_pred) == 0
     print "my time: ", my_time, "\t his time: ", his_time
+
+
 
     # ext_graph = ExtendedGraph(req, sub)
     # visualizer = ExtendedGraphVisualizer()
     # visualizer.visualize(ext_graph, substrate=sub, output_path="./out/test_example.png")
+
+
+
+def save_resources(sub, req, costs, lat):
+    with open('pickles/costs.p', 'wb') as handle:
+        pickle.dump(costs, handle, protocol=pickle.HIGHEST_PROTOCOL)
+    with open('pickles/lat.p', 'wb') as handle:
+        pickle.dump(lat, handle, protocol=pickle.HIGHEST_PROTOCOL)
+    with open('pickles/sub.p', 'wb') as handle:
+        pickle.dump(sub, handle, protocol=pickle.HIGHEST_PROTOCOL)
+    with open('pickles/req.p', 'wb') as handle:
+        pickle.dump(req, handle, protocol=pickle.HIGHEST_PROTOCOL)
+
+def load_resources():
+    with open('pickles/lat.p', 'rb') as handle:
+        b = pickle.load(handle)
+    with open('pickles/costs.p', 'rb') as handle:
+        c = pickle.load(handle)
+    with open('pickles/sub.p', 'rb') as handle:
+        a = pickle.load(handle)
+    with open('pickles/req.p', 'rb') as handle:
+        d = pickle.load(handle)
+    return a, d, c, b
+
+
+def build_triangle():
+    sub = datamodel.Substrate("test_sub_triangle")
+    sub.add_node("u", types=["t1"], capacity={"t1": 100}, cost={"t1": 1.0})
+    sub.add_node("v", types=["t1"], capacity={"t1": 100}, cost={"t1": 1.0})
+    sub.add_node("w", types=["t1"], capacity={"t1": 100}, cost={"t1": 1.0})
+
+    sub.add_edge("u", "v", capacity=100.0, cost=1.0, bidirected=False)
+    sub.add_edge("v", "w", capacity=100.0, cost=1.0, bidirected=False)
+    sub.add_edge("u", "w", capacity=100.0, cost=1.0, bidirected=False)
+
+    return sub
+
 
 
 if __name__ == "__main__":
