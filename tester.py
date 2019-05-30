@@ -1,5 +1,6 @@
 import random
 import time
+import numpy as np
 import cPickle as pickle
 
 from alib import datamodel
@@ -91,12 +92,13 @@ def get_latency(lat_pars):
     return random.randint(lat_pars["min_value"], lat_pars["max_value"] + 1)
 
 def get_cost():
-    return random.randint(0, 10) + 1
+    return float(random.randint(0, 10) + 1)
 
 
 def run_test():
 
     recompute_pars = False
+    save_pars = False
 
     # if recompute_pars:
     #
@@ -104,7 +106,7 @@ def run_test():
     #     # sub = graph_creator.sub
     #     # req = create_random_test_request(sub, **{"edge_resource_factor": 200})
     #
-    #     sub = create_large_substrate(8, 0.5)
+    # sub = create_large_substrate(8, 0.5)
     #     # sub = create_test_substrate()
     #
     #     # req = create_test_request("simple path")
@@ -112,69 +114,161 @@ def run_test():
     #     # req.node["i2"]["allowed_nodes"] = ["v", "u", "w"]
     #     # req.node["i3"]["allowed_nodes"] = ["u", "w", "v"]
     #
-    #     req = create_large_request(0, sub, "dragon 3")
+    # req = create_large_request(0, sub, "dragon 3")
     #
-    #     lat_pars = {"min_value": 50, "max_value": 400}
-    #     edge_costs = {e: 1.0 for e in sub.edges}
-    #     edge_latencies = {e: get_latency(lat_pars) for e in sub.edges}
+    # lat_pars = {"min_value": 50, "max_value": 400}
+    # edge_costs = {e: 1.0 for e in sub.edges}
+    # edge_latencies = {e: get_latency(lat_pars) for e in sub.edges}
     #     save_resources(sub, req, edge_costs, edge_latencies)
     # else:
     #     sub, req, edge_costs, edge_latencies = load_resources()
 
-    sub = build_triangle()
-    req = create_test_request("simple path")
-    edge_costs = {("u", "v"): 3, ("v", "w"): 1, ("u", "w"): 5}
-    edge_latencies = {("u", "v"): 20, ("v", "w"): 30, ("u", "w"): 30}
+
+
+    if recompute_pars:
+
+        """ large, random """
+        sub = create_large_substrate(8, 0.9)
+        req = create_large_request(0, sub, "dragon 3")
+
+        lat_pars = {"min_value": 50, "max_value": 400}
+        edge_costs = {e: get_cost() for e in sub.edges}
+        edge_latencies = {e: get_latency(lat_pars) for e in sub.edges}
+
+
+        # """ triangle """
+        # sub = build_triangle()
+        # req = create_test_request("simple path")
+        # edge_costs = {("u", "v"): 1, ("v", "w"): 2, ("u", "w"): 5, ("w", "x"): 2}
+        # edge_latencies = {("u", "v"): 352, ("v", "w"): 373, ("u", "w"): 106, ("w", "x"): 155}
+
+        if save_pars:
+            save_resources(sub, req, edge_costs, edge_latencies)
+    else:
+        sub, req, edge_costs, edge_latencies = load_resources()
 
     print req
     print sub
 
 
     print "edge_latencies: ", edge_latencies
+    print "costs: ", edge_costs
 
     vmrc = ValidMappingRestrictionComputer(sub, req)
     vmrc.compute()
-    print vmrc.get_number_of_different_edge_sets()
-    print(vmrc.get_reqedge_to_edgeset_id_mapping())
+    # print vmrc.get_number_of_different_edge_sets()
+    # print(vmrc.get_reqedge_to_edgeset_id_mapping())
     print(vmrc.get_edge_set_mapping())
 
 
     print "\n\n-- run --"
 
+    print "\n\n--------- mine ----------"
+    svpcwl = SVPC(sub, vmrc, edge_costs, edge_latencies, epsilon=0.1, limit=1000)
     start_mine = time.time()
-    svpcwl = SVPC(sub, vmrc, edge_costs, edge_latencies, epsilon=0.1, limit=700)
     svpcwl.compute()
     my_time = time.time() - start_mine
 
-    print "\n\n--------- mine ----------"
-    print svpcwl.valid_sedge_costs
-    print svpcwl.valid_sedge_pred
+    # print svpcwl.valid_sedge_costs
+    # print svpcwl.valid_sedge_pred
 
     # print "\n", svpcwl.valid_sedge_latencies
     # print edge_latencies
 
     print "\n\n--------- his ----------"
+    svpc_given = SVPC_given(sub, req, vmrc, edge_costs)
     start_his = time.time()
-    svpcwl2 = SVPC_given(sub, req, vmrc, edge_costs)
-    svpcwl2.compute()
+    svpc_given.compute()
     his_time = time.time() - start_his
 
 
-    print svpcwl2.valid_sedge_costs
-    print svpcwl2.valid_sedge_pred
+    # print svpc_given.valid_sedge_costs
+    # print svpc_given.valid_sedge_pred
 
 
     print "\n\n--------- sum ----------"
 
-    print "costs equal: \t", cmp(svpcwl.valid_sedge_costs, svpcwl2.valid_sedge_costs) == 0
-    print "preds equal:\t", cmp(svpcwl.valid_sedge_pred, svpcwl2.valid_sedge_pred) == 0
+    # print "costs equal: \t", cmp(svpcwl.valid_sedge_costs, svpc_given.valid_sedge_costs) == 0
+    # print "preds equal:\t", cmp(svpcwl.valid_sedge_pred, svpc_given.valid_sedge_pred) == 0
     print "my time: ", my_time, "\t his time: ", his_time
+    print (float(my_time) / his_time) if his_time > 0 else np.inf, " times as long\n\n"
+
+    # print check_approximation_guarantee(svpcwl.valid_sedge_costs, svpc_given.valid_sedge_costs, svpcwl.epsilon)
 
 
+
+    check_if_all_paths_valid(svpcwl, sub)
 
     # ext_graph = ExtendedGraph(req, sub)
     # visualizer = ExtendedGraphVisualizer()
     # visualizer.visualize(ext_graph, substrate=sub, output_path="./out/test_example.png")
+
+    print "exit debug"
+
+
+def check_if_all_paths_valid(svpcwl, sub):
+
+    inv_edges = set()
+    for snode_source in sub.nodes:
+        num_source_node = svpcwl.snode_id_to_num_id[snode_source]
+        for snode_target in sub.nodes:
+            n = svpcwl.snode_id_to_num_id[snode_target]
+            total_latencies = 0
+            path = [snode_target]
+            while n != num_source_node:
+                end = svpcwl.num_id_to_snode_id[n]
+                n = svpcwl.valid_sedge_pred[0][snode_source].get(end, None)
+
+                if n is None:
+                    break
+
+                path = [n] + path
+                n = svpcwl.snode_id_to_num_id[n]
+
+                sedge = (svpcwl.num_id_to_snode_id[n], end)
+
+                if sedge not in sub.edge:
+                    inv_edges.add(sedge)
+                    break
+
+                total_latencies += svpcwl.edge_latencies[sedge]
+
+            if total_latencies > svpcwl.limit:
+                print "ERROR: latency limit overstepped: {} -> {} by {},  \tusing {}".format(num_source_node, svpcwl.snode_id_to_num_id[snode_target], total_latencies - svpcwl.limit, path)
+
+    for sedge in inv_edges:
+        print "ERROR: invalid edge: {}".format(sedge)
+
+    print "valid path check done"
+
+
+def check_approximation_guarantee(approximated_costs, actual_costs, epsilon):
+
+    errors = []
+    max_factor = -1
+    for edge_set_index, edge_set_dict in approximated_costs.items():
+        for (start_node, end_node), costs in edge_set_dict.items():
+
+            act_costs = actual_costs[edge_set_index][(start_node, end_node)]
+
+            if np.isnan(act_costs) and np.isnan(costs):
+                approx_correct = True
+            else:
+                approx_correct = (costs <= act_costs * (1 + epsilon))
+
+                if act_costs > 0:
+                    factor = float(costs) / act_costs
+                    if factor > max_factor:
+                        max_factor = factor
+
+            if not approx_correct:
+                errors.append((edge_set_index, start_node, end_node, costs, act_costs, factor))
+
+            # print "Costs from {} to {}:\n\tmine\t{}\n\this:\t{}\n\t\t\t\t->  {}"\
+            #     .format(start_node, end_node, costs, act_costs, approx_correct)
+
+        return max_factor, errors
+
 
 
 
@@ -205,10 +299,12 @@ def build_triangle():
     sub.add_node("u", types=["t1"], capacity={"t1": 100}, cost={"t1": 1.0})
     sub.add_node("v", types=["t1"], capacity={"t1": 100}, cost={"t1": 1.0})
     sub.add_node("w", types=["t1"], capacity={"t1": 100}, cost={"t1": 1.0})
+    sub.add_node("x", types=["t1"], capacity={"t1": 100}, cost={"t1": 1.0})
 
     sub.add_edge("u", "v", capacity=100.0, cost=1.0, bidirected=False)
     sub.add_edge("v", "w", capacity=100.0, cost=1.0, bidirected=False)
     sub.add_edge("u", "w", capacity=100.0, cost=1.0, bidirected=False)
+    sub.add_edge("w", "x", capacity=100.0, cost=1.0, bidirected=False)
 
     return sub
 
