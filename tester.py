@@ -97,7 +97,7 @@ def get_cost():
 
 def run_test():
 
-    recompute_pars = False
+    recompute_pars = True
     save_pars = False
 
     # if recompute_pars:
@@ -127,20 +127,20 @@ def run_test():
 
     if recompute_pars:
 
-        """ large, random """
-        sub = create_large_substrate(8, 0.9)
-        req = create_large_request(0, sub, "dragon 3")
+        # """ large, random """
+        # sub = create_large_substrate(8, 0.9)
+        # req = create_large_request(0, sub, "dragon 3")
+        #
+        # lat_pars = {"min_value": 50, "max_value": 400}
+        # edge_costs = {e: get_cost() for e in sub.edges}
+        # edge_latencies = {e: get_latency(lat_pars) for e in sub.edges}
 
-        lat_pars = {"min_value": 50, "max_value": 400}
-        edge_costs = {e: get_cost() for e in sub.edges}
-        edge_latencies = {e: get_latency(lat_pars) for e in sub.edges}
 
-
-        # """ triangle """
-        # sub = build_triangle()
-        # req = create_test_request("simple path")
-        # edge_costs = {("u", "v"): 1, ("v", "w"): 2, ("u", "w"): 5, ("w", "x"): 2}
-        # edge_latencies = {("u", "v"): 352, ("v", "w"): 373, ("u", "w"): 106, ("w", "x"): 155}
+        """ triangle """
+        sub = build_triangle()
+        req = create_test_request("simple path")
+        edge_costs = {("u", "v"): 1, ("v", "w"): 2, ("u", "w"): 5, ("w", "x"): 2}
+        edge_latencies = {("u", "v"): 352, ("v", "w"): 373, ("u", "w"): 106, ("w", "x"): 155}
 
         if save_pars:
             save_resources(sub, req, edge_costs, edge_latencies)
@@ -164,7 +164,7 @@ def run_test():
     print "\n\n-- run --"
 
     print "\n\n--------- mine ----------"
-    svpcwl = SVPC(sub, vmrc, edge_costs, edge_latencies, epsilon=0.1, limit=1000)
+    svpcwl = SVPC(sub, vmrc, edge_costs, edge_latencies, epsilon=0.1, limit=100)
     start_mine = time.time()
     svpcwl.compute()
     my_time = time.time() - start_mine
@@ -175,11 +175,11 @@ def run_test():
     # print "\n", svpcwl.valid_sedge_latencies
     # print edge_latencies
 
-    print "\n\n--------- his ----------"
-    svpc_given = SVPC_given(sub, req, vmrc, edge_costs)
-    start_his = time.time()
-    svpc_given.compute()
-    his_time = time.time() - start_his
+    # print "\n\n--------- his ----------"
+    # svpc_given = SVPC_given(sub, req, vmrc, edge_costs)
+    # start_his = time.time()
+    # svpc_given.compute()
+    # his_time = time.time() - start_his
 
 
     # print svpc_given.valid_sedge_costs
@@ -190,14 +190,14 @@ def run_test():
 
     # print "costs equal: \t", cmp(svpcwl.valid_sedge_costs, svpc_given.valid_sedge_costs) == 0
     # print "preds equal:\t", cmp(svpcwl.valid_sedge_pred, svpc_given.valid_sedge_pred) == 0
-    print "my time: ", my_time, "\t his time: ", his_time
-    print (float(my_time) / his_time) if his_time > 0 else np.inf, " times as long\n\n"
+    # print "my time: ", my_time, "\t his time: ", his_time
+    # print (float(my_time) / his_time) if his_time > 0 else np.inf, " times as long\n\n"
 
     # print check_approximation_guarantee(svpcwl.valid_sedge_costs, svpc_given.valid_sedge_costs, svpcwl.epsilon)
 
 
 
-    check_if_all_paths_valid(svpcwl, sub)
+    # check_if_all_paths_valid(svpcwl, sub)
 
     # ext_graph = ExtendedGraph(req, sub)
     # visualizer = ExtendedGraphVisualizer()
