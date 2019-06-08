@@ -2156,7 +2156,6 @@ class RandRoundSepLPOptDynVMPCollection(object):
                  rounding_samples_per_lp_recomputation_mode,
                  number_initial_mappings_to_compute,
                  number_further_mappings_to_add,
-                 edge_latencies,
                  latency_approximation_factor=1,
                  latency_approximation_limit=1,
                  gurobi_settings=None,
@@ -2167,11 +2166,7 @@ class RandRoundSepLPOptDynVMPCollection(object):
         self.requests = self.scenario.requests
         self.objective = self.scenario.objective
 
-
-        if edge_latencies is None:
-            self.edge_latencies = {sedge: 0 for sedge in self.substrate.edges}
-        else:
-            self.edge_latencies = edge_latencies
+        self.edge_latencies = {sedge: self.substrate.edge[sedge]["latency"] for sedge in self.substrate.edges}
 
         self.latency_approximation_factor = latency_approximation_factor
         self.latency_approximation_limit = latency_approximation_limit
