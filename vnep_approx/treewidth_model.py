@@ -492,6 +492,107 @@ class ValidMappingRestrictionComputer(object):
         return self.number_of_different_edge_sets
 
 
+
+class ShortestValidPathsComputerWithoutLatencies(object):
+
+    ''' This class is optimized to compute all shortest paths in the substrate quickly for varying valid edge sets.
+    '''
+
+    def __init__(self, substrate, request, valid_mapping_restriction_computer, edge_costs):
+        self.substrate = substrate
+        self.request = request
+        self.valid_mapping_restriction_computer = valid_mapping_restriction_computer
+        self.edge_costs = edge_costs
+        self.edge_mapping_invalidities = False
+
+    def compute(self):
+        self.number_of_nodes = len(self.substrate.nodes)
+        self.distance = np.full(self.number_of_nodes, np.inf, dtype=np.float64)
+        self.predecessor = np.full(self.number_of_nodes, -1, dtype=np.int32)
+
+        self.edge_set_id_to_edge_set = self.valid_mapping_restriction_computer.get_edge_set_mapping()
+        self.number_of_valid_edge_sets = self.valid_mapping_restriction_computer.get_number_of_different_edge_sets()
+        self.valid_sedge_costs = {id: {} for id in range(self.number_of_valid_edge_sets)}
+        self.valid_sedge_pred = {id: {} for id in range(self.number_of_valid_edge_sets)}
+
+
+        self._prepare_numeric_graph()
+        self._compute_valid_edge_mapping_costs()
+
+    def recompute_with_new_costs(self, new_edge_costs):
+        self.edge_costs = new_edge_costs
+        self.compute()
+
+    def _prepare_numeric_graph(self):
+        #prepare and store information on "numeric graph"
+        self.number_of_nodes = 0
+        self.num_id_to_snode_id = []
+        self.snode_id_to_num_id = {}
+
+        for snode in self.substrate.nodes:
+            self.num_id_to_snode_id.append(snode)
+            self.snode_id_to_num_id[snode] = self.number_of_nodes
+            self.number_of_nodes += 1
+
+    def _compute_substrate_edge_abstraction_with_integer_nodes(self, valid_edge_set):
+        out_neighbors_with_cost = []
+
+        for num_node in range(self.number_of_nodes):
+
+            snode = self.num_id_to_snode_id[num_node]
+            neighbor_and_cost_list = []
+
+            for sedge in self.substrate.out_edges[snode]:
+                if sedge in valid_edge_set:
+                    _, out_neighbor = sedge
+                    num_id_neighbor = self.snode_id_to_num_id[out_neighbor]
+                    neighbor_and_cost_list.append((num_id_neighbor, self.edge_costs[sedge]))
+
+            out_neighbors_with_cost.append(neighbor_and_cost_list)
+
+        return out_neighbors_with_cost
+
+    def _compute_valid_edge_mapping_costs(self):
+
+        for edge_set_index in range(self.number_of_valid_edge_sets):
+
+            out_neighbors_with_cost = self._compute_substrate_edge_abstraction_with_integer_nodes(self.edge_set_id_to_edge_set[edge_set_index])
+
+            for num_source_node in range(self.number_of_nodes):
+
+                #reinitialize it
+                self.distance.fill(np.inf)
+                self.predecessor.fill(-1)
+
+                queue = [(0.0, (num_source_node, num_source_node))]
+                while queue:
+                    dist, (num_node, num_predecessor) = heappop(queue)
+                    if self.predecessor[num_node] == -1:
+                        self.distance[num_node] = dist
+                        self.predecessor[num_node] = num_predecessor
+
+                        for num_neighbor, edge_cost in out_neighbors_with_cost[num_node]:
+                            if self.predecessor[num_neighbor] == -1:
+                                heappush(queue, (dist + edge_cost, (num_neighbor, num_node)))
+
+                for num_target_node in range(self.number_of_nodes):
+                    if self.distance[num_target_node] != np.inf:
+                        self.valid_sedge_costs[edge_set_index][(self.num_id_to_snode_id[num_source_node], self.num_id_to_snode_id[num_target_node])] = self.distance[num_target_node]
+                    else:
+                        self.valid_sedge_costs[edge_set_index][(self.num_id_to_snode_id[num_source_node], self.num_id_to_snode_id[num_target_node])] = np.nan
+                        self.edge_mapping_invalidities = True
+
+                converted_pred_dict = {self.num_id_to_snode_id[num_node] : self.num_id_to_snode_id[self.predecessor[num_node]] if self.predecessor[num_node] != -1 else None for num_node in range(self.number_of_nodes)  }
+                self.valid_sedge_pred[edge_set_index][self.num_id_to_snode_id[num_source_node]] = converted_pred_dict
+
+        request_edge_to_edge_set_id = self.valid_mapping_restriction_computer.get_reqedge_to_edgeset_id_mapping()
+
+        for request_edge, edge_set_id_to_edge_set in request_edge_to_edge_set_id.iteritems():
+            self.valid_sedge_costs[request_edge] = self.valid_sedge_costs[edge_set_id_to_edge_set]
+            self.valid_sedge_pred[request_edge] = self.valid_sedge_pred[edge_set_id_to_edge_set]
+
+
+
 class ShortestValidPathsComputer(object):
 
     ''' This class is optimized to compute all shortest paths in the substrate quickly for varying valid edge sets while

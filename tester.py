@@ -7,8 +7,9 @@ from alib import datamodel
 from test.treewidth_model.test_data.substrate_test_data import create_test_substrate
 from test.treewidth_model.test_data.request_test_data import example_requests, create_test_request
 from vnep_approx.treewidth_model import ValidMappingRestrictionComputer
-from vnep_approx.latencies_extension import ShortestValidPathsComputerWithLatencies as SVPC
-from vnep_approx.treewidth_model import ShortestValidPathsComputer as SVPC_given
+from vnep_approx.treewidth_model import ShortestValidPathsComputer as SVPC
+from vnep_approx.treewidth_model import ShortestValidPathsComputerWithoutLatencies as SVPC_given
+from vnep_approx.latencies_approx_goel import ShortestValidPathsComputerWithLatencies as SVPC_goel
 
 # from vnep_approx.deferred.extendedgraph import ExtendedGraph
 # from vnep_approx.deferred.extended_graph_visualizer import ExtendedGraphVisualizer
@@ -128,7 +129,7 @@ def run_test():
     if recompute_pars:
 
         # """ large, random """
-        # sub = create_large_substrate(8, 0.9)
+        # sub = create_large_substrate(10, 0.5)
         # req = create_large_request(0, sub, "dragon 3")
         #
         # lat_pars = {"min_value": 50, "max_value": 400}
@@ -164,10 +165,12 @@ def run_test():
     print "\n\n-- run --"
 
     print "\n\n--------- mine ----------"
-    svpcwl = SVPC(sub, vmrc, edge_costs, edge_latencies, epsilon=0.1, limit=100)
+    svpcwl_goel = SVPC_goel(sub, vmrc, edge_costs, edge_latencies, epsilon=0.5, limit=1100)
     start_mine = time.time()
-    svpcwl.compute()
+    svpcwl_goel.compute()
     my_time = time.time() - start_mine
+
+    print svpcwl_goel.valid_sedge_paths
 
     # print svpcwl.valid_sedge_costs
     # print svpcwl.valid_sedge_pred
@@ -175,11 +178,19 @@ def run_test():
     # print "\n", svpcwl.valid_sedge_latencies
     # print edge_latencies
 
-    # print "\n\n--------- his ----------"
-    # svpc_given = SVPC_given(sub, req, vmrc, edge_costs)
-    # start_his = time.time()
-    # svpc_given.compute()
-    # his_time = time.time() - start_his
+
+    print "\n\n--------- my Lorenz ----------"
+
+    svpcwl_lorenz = SVPC(sub, vmrc, edge_costs, edge_latencies, epsilon=0.5, limit=1100)
+    start_mine2 = time.time()
+    svpcwl_lorenz.compute()
+    my_time2 = time.time() - start_mine2
+
+    print "\n\n--------- his ----------"
+    svpc_given = SVPC_given(sub, req, vmrc, edge_costs)
+    start_his = time.time()
+    svpc_given.compute()
+    his_time = time.time() - start_his
 
 
     # print svpc_given.valid_sedge_costs
@@ -190,8 +201,10 @@ def run_test():
 
     # print "costs equal: \t", cmp(svpcwl.valid_sedge_costs, svpc_given.valid_sedge_costs) == 0
     # print "preds equal:\t", cmp(svpcwl.valid_sedge_pred, svpc_given.valid_sedge_pred) == 0
-    # print "my time: ", my_time, "\t his time: ", his_time
-    # print (float(my_time) / his_time) if his_time > 0 else np.inf, " times as long\n\n"
+    # print "my time: ", my_time, "\t his time: ", his_time, "\t my time Lorenz:  ", my_time2
+    print "my time: ", my_time, "\t my time Lorenz:  ", my_time2
+    print (float(my_time2) / my_time) if my_time > 0 else np.inf, "times faster\n\n"
+    # print "Lor:\t", svpcwl_lorenz.valid_sedge_paths , "\nGoel:\t", svpcwl_goel.valid_sedge_paths
 
     # print check_approximation_guarantee(svpcwl.valid_sedge_costs, svpc_given.valid_sedge_costs, svpcwl.epsilon)
 
