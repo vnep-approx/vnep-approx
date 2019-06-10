@@ -105,7 +105,7 @@ class ShortestValidPathsComputerWithLatencies(object):
         b_low = lower
         b_up = math.ceil(upper / 2)
 
-        while b_up / b_low > 2:
+        while b_low == 0 or b_up / b_low > 2:
             b = math.sqrt(b_low * b_up)
             if self._SPPP(b, b, 1, num_source_node, num_target_node) == self.FAIL:
                 b_low = b
@@ -146,17 +146,17 @@ class ShortestValidPathsComputerWithLatencies(object):
         if num_source_node == num_target_node:
             return [self.num_id_to_snode_id[num_source_node]], 0, 0
 
-        low, high = -1, len(self.edge_levels_sorted) - 1
+        low, high = 0, len(self.edge_levels_sorted)
 
         while low < high - 1:
             j = int((low + high) / 2)
-            if self._shortest_path_latencies_limited(self.edge_levels_sorted[j], num_source_node,
+            if self._shortest_path_latencies_limited(self.edge_levels_sorted[j-1], num_source_node,
                                                      num_target_node) < self.limit:
                 high = j
             else:
                 low = j
 
-        lower = self.edge_levels_sorted[high]
+        lower = self.edge_levels_sorted[high-1]
         upper = lower * self.number_of_nodes
         return self._Hassin(lower, upper, num_source_node, num_target_node)
 

@@ -53,72 +53,113 @@ class ShortestValidPathsComputerWithLatencies(object):
             self.number_of_nodes += 1
 
 
-    def _DAD(self, num_source_node, tau):
+    def _DAD(self, num_source_node, tau, tau_modified_latencies):
 
         print("DAD? is that you?\nstarting from {}".format(self.num_id_to_snode_id[num_source_node]))
 
         self.distances = np.full((self.number_of_nodes, tau+1), np.inf, dtype=np.float64)
         self.distances[num_source_node][0] = 0
 
-        self.paths = {self.snode_id_to_num_id[snode]: [snode] for snode in self.substrate.nodes}
+        # self.paths = {self.snode_id_to_num_id[snode]: [snode] for snode in self.substrate.nodes}
+        # self.paths = [[[]] * tau] * self.number_of_nodes
 
-        tau_modified_latencies = {}
-        for key, value in self.edge_latencies.items():
-            tau_modified_latencies[key] = value * tau / self.limit
+        self.preds = np.full((self.number_of_nodes, tau+1), -1, dtype=np.int32)
+        self.preds[num_source_node][0] = num_source_node
+
 
         for t in range(1, tau+1):
             for num_current_node in range(self.number_of_nodes):
                 self.distances[num_current_node][t] = self.distances[num_current_node][t - 1]
+                self.preds[num_current_node][t] = self.preds[num_current_node][t - 1]
                 for sedge in self.current_valid_edge_set:
                     if sedge in self.substrate.in_edges[self.num_id_to_snode_id[num_current_node]]:
                         latency = tau_modified_latencies[sedge]
-                        if latency < t:
+                        if latency <= t:
                             num_in_neighbor = self.snode_id_to_num_id[sedge[0]]
                             val = self.distances[num_in_neighbor][t - latency] + self.edge_costs[sedge]
                             if val < self.distances[num_current_node][t]:
                                 self.distances[num_current_node][t] = val
+                                self.preds[num_current_node][t] = num_in_neighbor
 
-                                last_node_on_path = self.paths[num_current_node][-1]
+                                # last_node_on_path = self.preds[num_current_node][t]
 
-                                if last_node_on_path != sedge[1]:
-                                    self.paths[num_current_node][-1] = sedge[0]
-                                    print sedge
-                                else:
-                                    self.paths[num_current_node] += self.num_id_to_snode_id[num_in_neighbor]
+                                # if last_node_on_path != sedge[1]:
+                                #     self.preds[num_current_node][t] = self.snode_id_to_num_id[sedge[0]]
+                                # else:
+                                #     self.preds[num_current_node][t] = self.num_id_to_snode_id[num_in_neighbor]
+
+                                # last_node_on_path = self.paths[num_current_node][-1]
+
+                                # if last_node_on_path != sedge[1]:
+                                #     self.paths[num_current_node][-1] = sedge[0]
+                                #     print sedge
+                                # else:
+                                #     self.paths[num_current_node][t] = [self.num_id_to_snode_id[num_in_neighbor]] + \
+                                #                                    self.paths[num_current_node]
 
 
     def _approx_latencies(self, num_source_node):
 
         # One run of dijkstra with latencies as metric
 
-        tau = 100# int(math.log(self.limit) / 2)
+        tau = int(self.limit) / 1000 #max(int(math.log(self.limit) / 2), 1)
 
-        self.predecessor.fill(-1)
+        # self.predecessor.fill(-1)
+        self.paths = {self.snode_id_to_num_id[snode]: None for snode in self.substrate.nodes}
 
         approx_holds = False
 
         while not approx_holds:
 
-            self._DAD(num_source_node, tau)
+            tau_modified_latencies = {}
+            for key, value in self.edge_latencies.items():
+                tau_modified_latencies[key] = int(value * tau / self.limit)
+
+            self._DAD(num_source_node, tau, tau_modified_latencies)
 
             approx_holds = True
 
-            for snode in self.substrate.nodes:
+            for num_target_node in range(self.number_of_nodes):
                 added_latencies = 0
 
-                print "to ", snode, ":  " , self.paths[self.snode_id_to_num_id[snode]]
+                print "to ", self.num_id_to_snode_id[num_target_node], ":  "
 
-                for next_snode in self.paths[self.snode_id_to_num_id[snode]][1:-1]:
-                    sedge = (snode, next_snode)
-                    snode = next_snode
+                n = num_target_node
+                t = tau
+                path = [self.num_id_to_snode_id[num_target_node]]
+                while n != num_source_node:
+                    end = self.num_id_to_snode_id[n]
+                    n = self.preds[n][t]
+
+                    if n == -1:
+                        added_latencies = 0
+                        break
+
+
+                    sedge = (self.num_id_to_snode_id[n], end)
                     added_latencies += self.edge_latencies[sedge]
+                    path = [self.num_id_to_snode_id[n]] + path
+                    t -= tau_modified_latencies[self.num_id_to_snode_id[n], end]
 
-                self.temp_latencies[self.snode_id_to_num_id[snode]] = added_latencies
+                print "\t\t\t\t", path
+
+
+                # for next_snode in self.paths[self.snode_id_to_num_id[snode]][1:-1]:
+                #     sedge = (next_snode, snode)
+                #     snode = next_snode
+                #     added_latencies += self.edge_latencies[sedge]
+
+                print added_latencies
 
                 if added_latencies > (1 + self.epsilon) * self.limit:
-                    tau *= 2
+                # if max(self.delays[tau]) > (1 + self.epsilon) * self.limit:
                     approx_holds = False
+                    tau *= 2
                     break
+
+                # approximation good enough
+                self.temp_latencies[num_target_node] = added_latencies
+                self.paths[num_target_node] = path
 
         return tau-1
 
