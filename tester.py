@@ -141,7 +141,18 @@ def run_test():
         sub = build_triangle()
         req = create_test_request("simple path")
         edge_costs = {("u", "v"): 1, ("v", "w"): 2, ("u", "w"): 5, ("w", "x"): 2}
-        edge_latencies = {("u", "v"): 352, ("v", "w"): 373, ("u", "w"): 106, ("w", "x"): 155}
+        edge_latencies = {("u", "v"): 22, ("v", "w"): 22, ("u", "w"): 22, ("w", "x"): 22}
+        # edge_latencies = {("u", "v"): 352, ("v", "w"): 373, ("u", "w"): 106, ("w", "x"): 155}
+
+
+        # sub, req = build_substrate_and_request()
+        #
+        # edge_latencies = {}
+        # edge_costs = {}
+        # for sedge in sub.edges:
+        #     edge_latencies[sedge] = sub.edge[sedge]["latency"]
+        #     edge_costs[sedge] = sub.edge[sedge]["cost"]
+
 
         if save_pars:
             save_resources(sub, req, edge_costs, edge_latencies)
@@ -165,7 +176,7 @@ def run_test():
     print "\n\n-- run --"
 
     print "\n\n--------- mine ----------"
-    svpcwl_goel = SVPC_goel(sub, vmrc, edge_costs, edge_latencies, epsilon=0.5, limit=1100)
+    svpcwl_goel = SVPC_goel(sub, vmrc, edge_costs, edge_latencies, epsilon=0.5, limit=50000)
     start_mine = time.time()
     svpcwl_goel.compute()
     my_time = time.time() - start_mine
@@ -181,16 +192,18 @@ def run_test():
 
     print "\n\n--------- my Lorenz ----------"
 
-    svpcwl_lorenz = SVPC(sub, vmrc, edge_costs, edge_latencies, epsilon=0.5, limit=1100)
-    start_mine2 = time.time()
-    svpcwl_lorenz.compute()
-    my_time2 = time.time() - start_mine2
+    # svpcwl_lorenz = SVPC(sub, vmrc, edge_costs, edge_latencies, epsilon=0.5, limit=1100)
+    # start_mine2 = time.time()
+    # svpcwl_lorenz.compute()
+    # my_time2 = time.time() - start_mine2
+
+    # print my_time2
 
     print "\n\n--------- his ----------"
-    svpc_given = SVPC_given(sub, req, vmrc, edge_costs)
-    start_his = time.time()
-    svpc_given.compute()
-    his_time = time.time() - start_his
+    # svpc_given = SVPC_given(sub, req, vmrc, edge_costs)
+    # start_his = time.time()
+    # svpc_given.compute()
+    # his_time = time.time() - start_his
 
 
     # print svpc_given.valid_sedge_costs
@@ -202,8 +215,8 @@ def run_test():
     # print "costs equal: \t", cmp(svpcwl.valid_sedge_costs, svpc_given.valid_sedge_costs) == 0
     # print "preds equal:\t", cmp(svpcwl.valid_sedge_pred, svpc_given.valid_sedge_pred) == 0
     # print "my time: ", my_time, "\t his time: ", his_time, "\t my time Lorenz:  ", my_time2
-    print "my time: ", my_time, "\t my time Lorenz:  ", my_time2
-    print (float(my_time2) / my_time) if my_time > 0 else np.inf, "times faster\n\n"
+    # print "my time: ", my_time, "\t my time Lorenz:  ", my_time2
+    # print (float(my_time2) / my_time) if my_time > 0 else np.inf, "times faster\n\n"
     # print "Lor:\t", svpcwl_lorenz.valid_sedge_paths , "\nGoel:\t", svpcwl_goel.valid_sedge_paths
 
     # print check_approximation_guarantee(svpcwl.valid_sedge_costs, svpc_given.valid_sedge_costs, svpcwl.epsilon)
@@ -320,6 +333,15 @@ def build_triangle():
     sub.add_edge("w", "x", capacity=100.0, cost=1.0, bidirected=False)
 
     return sub
+
+
+
+def build_substrate_and_request():
+    with open('pickles/sub.p', 'rb') as handle:
+        a = pickle.load(handle)
+    with open('pickles/req.p', 'rb') as handle:
+        d = pickle.load(handle)
+    return a, d
 
 
 
