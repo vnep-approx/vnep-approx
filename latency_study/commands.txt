@@ -1,0 +1,11 @@
+Commands:
+
+# generate scenarios including latencies
+python -m vnep_approx.cli generate_scenarios sample_scenarios.pickle sample_scenarios_lat.yml
+
+
+# run algorithm respecting latencies
+python -m vnep_approx.cli start_experiment sample_latency_execution.yml 0 10000 --concurrent 2 --overwrite_existing_intermediate_solutions --remove_temporary_scenarios --remove_intermediate_solutions
+
+# reduce to plotting data # TOOODDOOOOO!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+python -m evaluation_acm_ccr_2019.cli reduce_to_plotdata_rand_round_pickle sample_scenarios_results_with_latencies.pickle
