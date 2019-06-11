@@ -92,10 +92,6 @@ class ShortestValidPathsComputerWithLatencies(object):
                     self.distances[num_current_node][t] = val
                     self.preds[num_current_node][t] = self.preds[num_current_node][t - 1]
 
-                # self.distances[num_current_node][t] = self.distances[num_current_node][t - 1]
-                # self.preds[num_current_node][t] = self.preds[num_current_node][t - 1]
-
-
                 for sedge in self.current_valid_edge_set:
                     if sedge in self.substrate.in_edges[self.num_id_to_snode_id[num_current_node]]:
                         latency = tau_modified_latencies[sedge]
@@ -105,24 +101,6 @@ class ShortestValidPathsComputerWithLatencies(object):
                             if val < self.distances[num_current_node][t]:
                                 self.distances[num_current_node][t] = val
                                 self.preds[num_current_node][t] = num_in_neighbor
-
-
-
-                # last_node_on_path = self.preds[num_current_node][t]
-
-                # if last_node_on_path != sedge[1]:
-                #     self.preds[num_current_node][t] = self.snode_id_to_num_id[sedge[0]]
-                # else:
-                #     self.preds[num_current_node][t] = self.num_id_to_snode_id[num_in_neighbor]
-
-                # last_node_on_path = self.paths[num_current_node][-1]
-
-                # if last_node_on_path != sedge[1]:
-                #     self.paths[num_current_node][-1] = sedge[0]
-                #     print sedge
-                # else:
-                #     self.paths[num_current_node][t] = [self.num_id_to_snode_id[num_in_neighbor]] + \
-                #                                    self.paths[num_current_node]
 
 
     # one run of dijkstra using delay metric to root out infeasible nodes
@@ -146,21 +124,6 @@ class ShortestValidPathsComputerWithLatencies(object):
                         heappush(queue, (total_latencies + lat, num_endpoint))
                         preds[num_endpoint] = num_current_node
 
-        # start, end = 5, 0
-        # if num_source_node == start:
-        #     n = end #self.snode_id_to_num_id['11']
-        #     path = [self.num_id_to_snode_id[end]]
-        #     total_lats = 0
-        #     while n != num_source_node:
-        #         end = self.num_id_to_snode_id[n]
-        #         n = preds[n]
-        #         sedge = (self.num_id_to_snode_id[n], end)
-        #         print sedge in self.current_valid_edge_set
-        #         total_lats += self.edge_latencies[sedge]
-        #         path = [self.num_id_to_snode_id[n]] + path
-        #
-        #     print path, total_lats
-
         # self.num_infeasible_nodes = 0
         for num_node in range(self.number_of_nodes):
             if self.temp_latencies[num_node] > self.limit:
@@ -181,7 +144,6 @@ class ShortestValidPathsComputerWithLatencies(object):
 
         while not approx_holds:
 
-            # print "\t ------------------------  tau:  " , tau, "\t---------------------------------"
             tau_modified_latencies = {}
             for key, value in self.edge_latencies.items():
                 tau_modified_latencies[key] = int(value * tau / self.limit)
@@ -211,7 +173,6 @@ class ShortestValidPathsComputerWithLatencies(object):
                     if n == -1:
                         # no path could be found!!
                         added_latencies = 0
-                        print num_target_node
                         approx_holds = False
                         # print "invalid edge:  " , end , " has no predecessor"
                         break
@@ -222,17 +183,8 @@ class ShortestValidPathsComputerWithLatencies(object):
                     path = [self.num_id_to_snode_id[n]] + path
                     t -= tau_modified_latencies[self.num_id_to_snode_id[n], end]
 
-                # for next_snode in self.paths[self.snode_id_to_num_id[snode]][1:-1]:
-                #     sedge = (next_snode, snode)
-                #     snode = next_snode
-                #     added_latencies += self.edge_latencies[sedge]
-
-                # if added_latencies > (1 + self.epsilon) * self.limit:
-                # if max(self.delays[tau]) > (1 + self.epsilon) * self.limit:
-
                 if added_latencies > (1 + self.epsilon) * self.limit:
                     approx_holds = False
-
 
                 if not approx_holds:
                     tau *= 2
@@ -270,20 +222,6 @@ class ShortestValidPathsComputerWithLatencies(object):
 
                     costs = self.distances[num_target_node][final_tau]
 
-                    # n = num_target_node
-                    # path = [self.num_id_to_snode_id[num_target_node]]
-                    # total_costs = 0
-                    # while n != num_source_node:
-                    #     end = self.num_id_to_snode_id[n]
-                    #     n = self.predecessor[n]
-                    #     sedge = (self.num_id_to_snode_id[n], end)
-                    #     total_costs += self.edge_costs[sedge]
-                    #     path = [self.num_id_to_snode_id[n]] + path
-
-
-                    # print "Equality check:  {} == {} \t \t -> {}".format(costs, total_costs, total_costs == costs)
-
-
                     self.valid_sedge_costs[edge_set_index][
                         (self.num_id_to_snode_id[num_source_node], self.num_id_to_snode_id[num_target_node])] = costs
                     self.valid_sedge_latencies[edge_set_index][
@@ -301,11 +239,6 @@ class ShortestValidPathsComputerWithLatencies(object):
 
                     converted_path_dict[self.num_id_to_snode_id[num_target_node]] = self.paths[num_target_node]\
                         if num_target_node != num_source_node else [self.num_id_to_snode_id[num_source_node]]
-
-
-                        #['valid path']#\
-                        # self.paths[num_target_node] if len(self.paths[num_target_node]) > 1 \
-                        #     or num_source_node == num_target_node else None
 
                 self.valid_sedge_paths[edge_set_index][self.num_id_to_snode_id[num_source_node]] = converted_path_dict
 
