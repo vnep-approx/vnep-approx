@@ -163,7 +163,8 @@ class ShortestValidPathsComputerWithLatencies(object):
 
                 if self.preds[num_target_node][t] == -1:
                     approx_holds = False
-                    continue
+                    tau *= 2
+                    break
 
                 path = [self.num_id_to_snode_id[num_target_node]]
                 while n != num_source_node:

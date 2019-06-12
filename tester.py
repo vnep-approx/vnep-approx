@@ -128,13 +128,13 @@ def run_test():
 
     if recompute_pars:
 
-        """ large, random """
-        sub = create_large_substrate(40, 0.8)
-        req = create_large_request(0, sub, "dragon 3")
-
-        lat_pars = {"min_value": 50, "max_value": 400}
-        edge_costs = {e: get_cost() for e in sub.edges}
-        edge_latencies = {e: get_latency(lat_pars) for e in sub.edges}
+        # """ large, random """
+        # sub = create_large_substrate(40, 0.8)
+        # req = create_large_request(0, sub, "dragon 3")
+        #
+        # lat_pars = {"min_value": 50, "max_value": 400}
+        # edge_costs = {e: get_cost() for e in sub.edges}
+        # edge_latencies = {e: get_latency(lat_pars) for e in sub.edges}
 
 
         # """ triangle """
@@ -145,13 +145,13 @@ def run_test():
         # # edge_latencies = {("u", "v"): 352, ("v", "w"): 373, ("u", "w"): 106, ("w", "x"): 155}
 
 
-        # sub, req = build_substrate_and_request()
-        #
-        # edge_latencies = {}
-        # edge_costs = {}
-        # for sedge in sub.edges:
-        #     edge_latencies[sedge] = int(sub.edge[sedge]["latency"] * (10 ** 5)) + 40
-        #     edge_costs[sedge] = sub.edge[sedge]["cost"]
+        sub, req = build_substrate_and_request()
+
+        edge_latencies = {}
+        edge_costs = {}
+        for sedge in sub.edges:
+            edge_latencies[sedge] = int(sub.edge[sedge]["latency"]) #'* (10 ** 5)) + 40
+            edge_costs[sedge] = sub.edge[sedge]["cost"]
 
 
         if save_pars:
@@ -179,9 +179,9 @@ def run_test():
     print "\n\n-- run --"
 
     print "\n\n--------- mine ----------"
-    svpcwl_goel = SVPC_goel(sub, vmrc, edge_costs, edge_latencies, epsilon=0.08, limit=1000)
+    svpcwl_goel = SVPC(sub, vmrc, edge_costs, edge_latencies, epsilon=0.5, limit=4000)
     start_mine = time.time()
-    svpcwl_goel.compute()
+    # svpcwl_goel.compute()
     my_time = time.time() - start_mine
 
     # print svpcwl_goel.valid_sedge_paths
@@ -235,6 +235,25 @@ def run_test():
 
     print "exit debug"
 
+
+def check_edges_in_substrate(svpc, sub):
+    inv_edges = set()
+    for edgeset in range(svpc.number_of_valid_edge_sets):
+        for start_node in sub.nodes:
+            for target_node in sub.nodes:
+                path = svpc.valid_sedge_paths[edgeset][start_node][target_node]
+
+                split_path = set()
+
+
+                if not path <= sub.edges:
+                    print "ERROR!!"
+                    inv_edges.add(path)
+
+    if inv_edges:
+        print "Invalid Paths:\n", inv_edges
+    else:
+        print "all edges good!"
 
 def check_if_all_paths_valid(svpcwl, sub):
 
@@ -349,5 +368,50 @@ def build_substrate_and_request():
 
 
 
+
+def inspect_svpc():
+
+    # svpc = None
+    # with open('latency_study/pickles/svpc.p', 'rb') as handle:
+    #     svpc = pickle.load(handle)
+    #
+    # # svpc.compute()
+    #
+    #
+    # svpcwl = SVPC(svpc.substrate, svpc.valid_mapping_restriction_computer, svpc.edge_costs, svpc.edge_latencies, 1, svpc.limit)
+
+    # svpcwl.limit = 4000
+
+    sub, req = build_substrate_and_request()
+
+    vmrc = ValidMappingRestrictionComputer(sub, req)
+
+    svpcwl = SVPC(sub, vmrc, )
+
+    svpcwl.compute()
+
+    with open('pickles/paths.p', 'wb') as handle:
+        pickle.dump(svpcwl.valid_sedge_paths, handle, protocol=pickle.HIGHEST_PROTOCOL)
+
+    check_edges_in_substrate(svpcwl, svpcwl.substrate)
+
+
+    print "done"
+
+
+
+def inpsect_pickles():
+
+    svpc = None
+
+    with open('latency_study/pickles/vnet_1_mappings.p', 'rb') as handle:
+        svpc = pickle.load(handle)
+
+
+    print "done"
+
+
 if __name__ == "__main__":
-    run_test()
+    # run_test()
+    # inspect_svpc()
+    inpsect_pickles()
