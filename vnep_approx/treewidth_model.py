@@ -1987,6 +1987,7 @@ class RandRoundSepLPOptDynVMPCollection(object):
             elif isinstance(rounding_order, RoundingOrder):
                 self.rounding_order_list.append(rounding_order)
             else:
+                # TODO (NB): maybe new ones are needed
                 raise ValueError("Cannot handle this rounding order.")
 
         for lp_recomputation_mode in lp_recomputation_mode_list:
@@ -1997,12 +1998,7 @@ class RandRoundSepLPOptDynVMPCollection(object):
             else:
                 raise ValueError("Cannot handle this LP recomputation mode.")
 
-        if self.objective == datamodel.Objective.MAX_PROFIT:
-            pass
-        elif self.objective == datamodel.Objective.MIN_COST:
-            raise ValueError("The separation LP algorithm can at the moment just handle max-profit instances.")
-        else:
-            raise ValueError("The separation LP algorithm can at the moment just handle max-profit instances.")
+        self.check_supported_objective()
 
         self.gurobi_settings = gurobi_settings
 
@@ -2021,6 +2017,18 @@ class RandRoundSepLPOptDynVMPCollection(object):
             self.logger = util.get_logger(__name__, make_file=False, propagate=True)
         else:
             self.logger = logger
+
+    def check_supported_objective(self):
+        '''Raised ValueError if a not supported objective is found in the input scenario
+        :return:
+        '''
+        if self.objective == datamodel.Objective.MAX_PROFIT:
+            pass
+        elif self.objective == datamodel.Objective.MIN_COST:
+            raise ValueError("The separation LP algorithm can at the moment just handle max-profit instances.")
+        else:
+            raise ValueError("The separation LP algorithm can at the moment just handle max-profit instances.")
+
 
     def init_model_creator(self):
         ''' Initializes the modelcreator by generating the model. Afterwards, model.compute() can be called to let
