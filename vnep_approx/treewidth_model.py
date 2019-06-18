@@ -783,7 +783,7 @@ class OptimizedDynVMPNode(object):
             raise ValueError("Given index {} is out of bounds [0,...,{}].".format(mapping_index,
                                                                                   self.number_of_potential_node_mappings))
 
-
+        # enumerates all possible mappings of this DynVMPNode
         result_node_mapping = {}
         for reversed_reqnode_index in range(self.number_of_request_nodes):
             request_node = self._reversed_contained_request_nodes[reversed_reqnode_index]
