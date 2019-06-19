@@ -2309,6 +2309,8 @@ class RandRoundSepLPOptDynVMPCollection(object):
 
         #do the magic here
 
+        # TODO (NB): This seems to be an initialization step, which should be in a different function, because the cost variant have to
+        # execute a whole profit variant to initialize the dual variables before the separation can start.
         for req in self.requests:
             self.logger.debug("Getting first mappings for request {}".format(req.name))
             # execute algorithm

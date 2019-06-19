@@ -69,8 +69,15 @@ class RandRoundSepLPOptDynVMPCollectionForFogModel(twm.RandRoundSepLPOptDynVMPCo
             raise ValueError("The separation LP for algorithm Fog model can only handle min-cost instances.")
 
     def create_empty_objective(self):
-        # TODO (NB): according to Matthias' thesis, this should be inicialized by solving a profit version with all profits set to 1.
+        # TODO (NB): according to Matthias' thesis, this should be inicialized by solving a profit version with all profits set to 1. and
+        # calculate the initial objective value based on the found initial embedding of the requests. (is there easier way?)
         self.model.setObjective(10, GRB.MINIMIZE)
+
+    def create_empty_request_embedding_bound_constraints(self):
+        self.embedding_bound = {req : None for req in self.requests}
+        for req in self.requests:
+            # all request needs to be embedded, so equality is needed!
+            self.embedding_bound[req] = self.model.addConstr(0, GRB.EQUAL, 1)
 
     def update_dual_costs_and_reinit_dynvmps(self):
         #update dual costs
@@ -103,10 +110,13 @@ class RandRoundSepLPOptDynVMPCollectionForFogModel(twm.RandRoundSepLPOptDynVMPCo
             self.dynvmp_runtimes_computation[req].append(time.time() - single_dynvmp_runtime)
             opt_cost = dynvmp_instance.get_optimal_solution_cost()
             if opt_cost is not None:
+                # TODO (NB): this needs to be set differently, due to the different type of constraint violations
                 dual_violation_of_req = (opt_cost - req.profit + self.dual_costs_requests[req])
                 if dual_violation_of_req < 0:
                     total_dual_violations += (-dual_violation_of_req)
 
+        # Gives objective bound following from the weak duality: scaling the dual variables (interpreted as resource costs) by a factor
+        # of 1 + eps (where eps == dual_violation_of_req) gives a feasible dual solution increasing the objective value by at most 1 + eps
         self._current_obj_bound = current_objective + total_dual_violations
 
         self._current_solution_quality = None
@@ -152,7 +162,7 @@ class RandRoundSepLPOptDynVMPCollectionForFogModel(twm.RandRoundSepLPOptDynVMPCo
             if costs[index] > cutoff:
                 break
             #store mapping
-            # TODO (NB): this should be done differently
+            # TODO (NB): this should be done differently, because this is the introduction of the new variable to the objective
             varname = "f_req[{}]_k[{}]".format(req.name, index+len(self.mappings_of_requests[req]))
             new_var = self.model.addVar(lb=0.0,
                                         ub=1.0,
@@ -167,6 +177,7 @@ class RandRoundSepLPOptDynVMPCollectionForFogModel(twm.RandRoundSepLPOptDynVMPCo
 
         #make variables accessible
         self.model.update()
+        # capacity constraints and the allocation calculations are the same at the cost variant, so this should not change
         for index, new_var in enumerate(current_new_variables):
             #handle allocations
             corresponding_allocation = current_new_allocations[index]
