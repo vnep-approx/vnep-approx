@@ -1670,7 +1670,7 @@ class SeparationLP_OptDynVMP(object):
         current_obj = 0
         #the abortion criterion here is not perfect and should probably depend on the relative error instead of the
         #absolute one.
-        while new_columns_generated and abs(current_obj-last_obj) > 0.1:
+        while new_columns_generated and abs(current_obj-last_obj) > 0.001:
             gurobi_runtime = time.time()
             self.model.optimize()
             last_obj = current_obj
@@ -1681,6 +1681,10 @@ class SeparationLP_OptDynVMP(object):
             new_columns_generated = self.perform_separation_and_introduce_new_columns()
 
             counter += 1
+        # We might have to run a last optimization, if we have exited due to falling below the required absolute error of the objective
+        if new_columns_generated:
+            # NOTE: shouldn't another update be executed before the optimize runs?
+            self.model.optimize()
 
         self.time_optimization = time.time() - time_optimization_start
 
