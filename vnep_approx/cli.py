@@ -29,6 +29,7 @@ import alib.cli
 from alib import run_experiment, util
 from . import modelcreator_ecg_decomposition, randomized_rounding_triumvirate
 from . import treewidth_model
+from . import treewidth_based_fog_model
 from . import vine
 import logging
 
@@ -134,6 +135,12 @@ def f_start_experiment(experiment_yaml,
     run_experiment.register_algorithm(
         treewidth_model.RandRoundSepLPOptDynVMPCollection.ALGORITHM_ID,
         treewidth_model.RandRoundSepLPOptDynVMPCollection
+    )
+
+    # register new algorithm for Fogmodel
+    run_experiment.register_algorithm(
+        treewidth_based_fog_model.RandRoundSepLPOptDynVMPCollectionForFogModel.ALGORITHM_ID,
+        treewidth_based_fog_model.RandRoundSepLPOptDynVMPCollectionForFogModel
     )
     with open(experiment_yaml, "r") as actual_experiment_yaml:
         run_experiment.run_experiment(
