@@ -2297,20 +2297,12 @@ class RandRoundSepLPOptDynVMPCollection(object):
         self.logger.info("Successfully loaded warmstart LP Basis (whether this basis is used in the following is indicated by the log of gurobi).")
 
 
-    def compute_solution(self):
-        ''' Abstract function computing an integral solution to the model (generated before).
+    def get_first_mappings_for_requests(self):
+        """
+        Initialize the objective function by introducing some variables for all of the requests.
 
-        :return: Result of the optimization consisting of an instance of the GurobiStatus together with a result
-                 detailing the solution computed by Gurobi.
-        '''
-        self.logger.info("Starting computing solution")
-        # do the optimization
-        time_optimization_start = time.time()
-
-        #do the magic here
-
-        # TODO (NB): This seems to be an initialization step, which should be in a different function, because the cost variant have to
-        # execute a whole profit variant to initialize the dual variables before the separation can start.
+        :return:
+        """
         for req in self.requests:
             self.logger.debug("Getting first mappings for request {}".format(req.name))
             # execute algorithm
@@ -2323,8 +2315,20 @@ class RandRoundSepLPOptDynVMPCollection(object):
                 self.logger.debug("Introducing new columns for {}".format(req.name))
                 self.introduce_new_columns(req,
                                            maximum_number_of_columns_to_introduce=self.number_initial_mappings_to_compute)
-
         self.model.update()
+
+    def compute_solution(self):
+        ''' Abstract function computing an integral solution to the model (generated before).
+
+        :return: Result of the optimization consisting of an instance of the GurobiStatus together with a result
+                 detailing the solution computed by Gurobi.
+        '''
+        self.logger.info("Starting computing solution")
+        # do the optimization
+        time_optimization_start = time.time()
+
+        #do the magic here
+        self.get_first_mappings_for_requests()
 
         new_columns_generated = True
         counter = 0
