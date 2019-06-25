@@ -123,10 +123,10 @@ class RandRoundSepLPOptDynVMPCollectionForFogModel(twm.RandRoundSepLPOptDynVMPCo
         :return:
         """
         self.profit_variant_algorithm_instance.compute_solution()
-        # TODO: this feasibility checking is needed! now we can ommit it until, we have generated proper minimization scenarios
-        # if not self.profit_variant_algorithm_instance.status.hasFeasibleStatus() or\
-        #   math.fabs(self.profit_variant_algorithm_instance.status.getObjectiveValue() - len(self.scenario.requests)) > EPSILON:
-        #     raise ValueError("Scenario is unfeasible, not all requests can be mapped at the same time!")
+        # this feasibility checking is needed!
+        if not self.profit_variant_algorithm_instance.status.hasFeasibleStatus() or\
+          math.fabs(self.profit_variant_algorithm_instance.status.getObjectiveValue() - len(self.scenario.requests)) > EPSILON:
+            raise ValueError("Scenario is unfeasible, not all requests can be mapped at the same time!")
         # Add all mapping variables for each req's each valid mapping found by the initial optimization
         universal_node_type = self.substrate.types.copy().pop()
         for req, req_profit_variant in zip(self.requests, self.profit_variant_algorithm_instance.requests):
@@ -149,6 +149,8 @@ class RandRoundSepLPOptDynVMPCollectionForFogModel(twm.RandRoundSepLPOptDynVMPCo
                                               obj=sum_cost_of_valid_mapping,
                                               vtype=GRB.CONTINUOUS, name=gurobi_var.VarName)
                 self.mapping_variables[req].append(new_var)
+                # update the valid embedding constraint for each corresponding variable (initially it is invalid 0=1)
+                self.model.chgCoeff(self.embedding_bound[req], new_var, 1.0)
                 # mappings can be safely reused, just redirect the references to the current algorithm's object
                 for mapping in valid_mappings_of_req:
                     mapping.request = req
