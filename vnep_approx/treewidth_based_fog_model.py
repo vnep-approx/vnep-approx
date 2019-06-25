@@ -151,11 +151,13 @@ class RandRoundSepLPOptDynVMPCollectionForFogModel(twm.RandRoundSepLPOptDynVMPCo
                 self.mapping_variables[req].append(new_var)
                 # update the valid embedding constraint for each corresponding variable (initially it is invalid 0=1)
                 self.model.chgCoeff(self.embedding_bound[req], new_var, 1.0)
-                # mappings can be safely reused, just redirect the references to the current algorithm's object
+                # mappings can be safely reused, we just redirect the references to the current algorithm's object
+                reused_valid_mapping_objects = []
                 for mapping in valid_mappings_of_req:
                     mapping.request = req
                     mapping.substrate = self.substrate
-                    self.mappings_of_requests[req] = mapping
+                    reused_valid_mapping_objects.append(mapping)
+                self.mappings_of_requests[req] = reused_valid_mapping_objects
         # make added variables avaialbe
         self.model.update()
         for req in self.requests:
