@@ -28,13 +28,8 @@ from gurobipy import GRB
 import treewidth_model as twm
 from alib import datamodel
 
+
 EPSILON = 0.00001
-
-class RandRoundSepLPOptDynVMPCollectionForFogModelResult(twm.RandRoundSepLPOptDynVMPCollectionResult):
-
-    def __init__(self, scenario, lp_computation_information):
-        # TODO (NB): use it, even if the same info should be stored??
-        super(RandRoundSepLPOptDynVMPCollectionForFogModelResult, self).__init__(scenario, lp_computation_information)
 
 
 class RandRoundSepLPOptDynVMPCollectionForFogModel(twm.RandRoundSepLPOptDynVMPCollection):
@@ -67,6 +62,9 @@ class RandRoundSepLPOptDynVMPCollectionForFogModel(twm.RandRoundSepLPOptDynVMPCo
             req.profit = 1.0
             if len(req.types) != 1:
                 raise ValueError("Cost minimizing separation LP is not prepared for multiple NF and/or resource types")
+
+        # Add all mapping variables for each req's each valid mapping found by the initial optimization
+        self.universal_node_type = self.substrate.types.copy().pop()
         # we do not need the randomized rounding in this case, so a simple separation LP is enough
         self.profit_variant_algorithm_instance = twm.SeparationLP_OptDynVMP(scenario_with_unit_profit,
                                                                              gurobi_settings,
@@ -85,10 +83,9 @@ class RandRoundSepLPOptDynVMPCollectionForFogModel(twm.RandRoundSepLPOptDynVMPCo
             raise ValueError("The separation LP for algorithm Fog model can only handle min-cost instances.")
 
     def create_empty_objective(self):
-        # TODO (NB): according to Matthias' thesis, this should be inicialized by solving a profit version with all profits set to 1. and
+        # According to Matthias' thesis, this should be inicialized by solving a profit version with all profits set to 1. and
         # calculate the initial objective value based on the found initial embedding of the requests.
-        # TODO: (is there easier way?): this initialization might be completly ignored due to the actions taken in
-        # get_first_mappings_for_requests, this builds the variables which are involved in the objective.
+        # This procedure is implemented in get_first_mappings_for_requests
         self.model.setObjective(0, GRB.MINIMIZE)
 
     def create_empty_request_embedding_bound_constraints(self):
@@ -99,21 +96,46 @@ class RandRoundSepLPOptDynVMPCollectionForFogModel(twm.RandRoundSepLPOptDynVMPCo
 
     def update_dual_costs_and_reinit_dynvmps(self):
         #update dual costs
-        # TODO (NB): this should be done differently
         for snode in self.snodes:
-            self.dual_costs_node_resources[snode] = self.capacity_constraints[snode].Pi
+            # the dual variables' value must be non positive
+            if self.capacity_constraints[snode].Pi > 0:
+                raise ValueError("Found positive dual value for node resource cost!")
+            self.dual_costs_node_resources[snode] = self.substrate.node[snode]['cost'][self.universal_node_type] -\
+                                                                                    self.capacity_constraints[snode].Pi
         for sedge in self.sedges:
-            self.dual_costs_edge_resources[sedge] = self.capacity_constraints[sedge].Pi
+            if self.capacity_constraints[sedge].Pi > 0:
+                raise ValueError("Found positive dual value for edge resource cost!")
+            self.dual_costs_edge_resources[sedge] = self.substrate.edge[sedge]['cost'] - self.capacity_constraints[sedge].Pi
+        # its meaning is unchanged compared to the profit variant, but the domain is different, which affects the constraint separation
+        # decisions
         for req in self.requests:
             self.dual_costs_requests[req] = self.embedding_bound[req].Pi
 
-        #reinit dynvmps
+        # reinit dynvmps the same way as in profit variant
         for req in self.requests:
             dynvmp_instance = self.dynvmp_instances[req]
             single_dynvmp_reinit_time = time.time()
             dynvmp_instance.reinitialize(new_node_costs=self.dual_costs_node_resources,
                                          new_edge_costs=self.dual_costs_edge_resources)
             self.dynvmp_runtimes_initialization[req].append(time.time() - single_dynvmp_reinit_time)
+
+    def calculate_total_cost_of_single_valid_mapping(self, allocations_of_sinlge_valid_mapping):
+        """
+        Calculates the embedding cost of a single valid embedding, whose allocations are given as the input.
+
+        :param allocations_of_sinlge_valid_mapping:
+        :return:
+        """
+        sum_cost_of_valid_mapping = 0.0
+        for sres, alloc in allocations_of_sinlge_valid_mapping.iteritems():
+            res_cost = None
+            if type(sres) is tuple and self.universal_node_type not in sres:
+                res_cost = self.substrate.edge[sres]['cost']
+            elif type(sres) is str:
+                res_cost = self.substrate.node[sres]['cost'][self.universal_node_type]
+            if res_cost is not None:
+                sum_cost_of_valid_mapping += res_cost * alloc
+        return sum_cost_of_valid_mapping
 
     def get_first_mappings_for_requests(self):
         """
@@ -127,23 +149,13 @@ class RandRoundSepLPOptDynVMPCollectionForFogModel(twm.RandRoundSepLPOptDynVMPCo
         if not self.profit_variant_algorithm_instance.status.hasFeasibleStatus() or\
           math.fabs(self.profit_variant_algorithm_instance.status.getObjectiveValue() - len(self.scenario.requests)) > EPSILON:
             raise ValueError("Scenario is unfeasible, not all requests can be mapped at the same time!")
-        # Add all mapping variables for each req's each valid mapping found by the initial optimization
-        universal_node_type = self.substrate.types.copy().pop()
         for req, req_profit_variant in zip(self.requests, self.profit_variant_algorithm_instance.requests):
             for index, gurobi_var  in enumerate(self.profit_variant_algorithm_instance.mapping_variables[req_profit_variant]):
                 valid_mappings_of_req = self.profit_variant_algorithm_instance.mappings_of_requests[req_profit_variant]
                 allocations_of_sinlge_valid_mapping = self._compute_allocations(req, valid_mappings_of_req[index])
                 # save allocations for usage at the constraints (so we wont have to model.update() after each variable addition)
                 self.allocations_of_mappings[req].append(allocations_of_sinlge_valid_mapping)
-                sum_cost_of_valid_mapping = 0.0
-                for sres, alloc in allocations_of_sinlge_valid_mapping.iteritems():
-                    res_cost = None
-                    if type(sres) is tuple and universal_node_type not in sres:
-                        res_cost = self.substrate.edge[sres]['cost']
-                    elif type(sres) is str:
-                        res_cost = self.substrate.node[sres]['cost'][universal_node_type]
-                    if res_cost is not None:
-                        sum_cost_of_valid_mapping += res_cost * alloc
+                sum_cost_of_valid_mapping = self.calculate_total_cost_of_single_valid_mapping(allocations_of_sinlge_valid_mapping)
                 # keep the variable name convention used before
                 new_var = self.model.addVar(lb=0.0, ub=1.0,
                                               obj=sum_cost_of_valid_mapping,
@@ -178,14 +190,15 @@ class RandRoundSepLPOptDynVMPCollectionForFogModel(twm.RandRoundSepLPOptDynVMPCo
             if req in ignore_requests:
                 continue
             # execute algorithm
+            # Dual costs are already initialized
             dynvmp_instance = self.dynvmp_instances[req]
             single_dynvmp_runtime = time.time()
             dynvmp_instance.compute_solution()
             self.dynvmp_runtimes_computation[req].append(time.time() - single_dynvmp_runtime)
             opt_cost = dynvmp_instance.get_optimal_solution_cost()
             if opt_cost is not None:
-                # TODO (NB): this needs to be set differently, due to the different type of constraint violations
-                dual_violation_of_req = (opt_cost - req.profit + self.dual_costs_requests[req])
+                # the cost variant is violated if this is negative
+                dual_violation_of_req = (opt_cost - self.dual_costs_requests[req])
                 if dual_violation_of_req < 0:
                     total_dual_violations += (-dual_violation_of_req)
 
@@ -208,17 +221,17 @@ class RandRoundSepLPOptDynVMPCollectionForFogModel(twm.RandRoundSepLPOptDynVMPCo
             self.logger.info("Ending LP computation as found solution is {}-near optimal, which lies below threshold of {}".format(self._current_solution_quality, self.lp_relative_quality))
             return False
         else:
-
             for req in self.requests:
                 if req in ignore_requests:
                     continue
                 dynvmp_instance = self.dynvmp_instances[req]
                 opt_cost = dynvmp_instance.get_optimal_solution_cost()
-                # TODO (NB): this should be done differently
-                if opt_cost is not None and opt_cost < 0.999*(req.profit - self.dual_costs_requests[req]):
+                # the violation criteria is changed
+                if opt_cost is not None and opt_cost < self.dual_costs_requests[req]:
+                    # cutoff is set to not intorduce more expensive valid mappings then our current upper bound
                     self.introduce_new_columns(req,
                                                maximum_number_of_columns_to_introduce=self.number_further_mappings_to_add,
-                                               cutoff = req.profit-self.dual_costs_requests[req])
+                                               cutoff = self.dual_costs_requests[req])
                     new_columns_generated = True
 
             return new_columns_generated
@@ -235,25 +248,25 @@ class RandRoundSepLPOptDynVMPCollectionForFogModel(twm.RandRoundSepLPOptDynVMPCo
         for index, mapping in enumerate(mapping_list):
             if costs[index] > cutoff:
                 break
-            #store mapping
-            # TODO (NB): this should be done differently, because this is the introduction of the new variable to the objective
-            varname = "f_req[{}]_k[{}]".format(req.name, index+len(self.mappings_of_requests[req]))
-            new_var = self.model.addVar(lb=0.0,
-                                        ub=1.0,
-                                        obj=req.profit,
+            # TODO (NB): Which cost function should calculating the objective coefficient should use? the original substrate cost or the
+            # iteratively updated dual costs? (FOR NOW assume the original)
+            # compute corresponding substrate allocation
+            mapping_allocations = self._compute_allocations(req, mapping)
+            total_cost_of_mapping = self.calculate_total_cost_of_single_valid_mapping(mapping_allocations)
+            varname = "f_req[{}]_k[{}]".format(req.name, len(self.mappings_of_requests[req]) + index)
+            new_var = self.model.addVar(lb=0.0, ub=1.0,
+                                        obj=total_cost_of_mapping,
                                         vtype=GRB.CONTINUOUS,
                                         name=varname)
             current_new_variables.append(new_var)
-
-            #compute corresponding substrate allocation and store it
-            mapping_allocations = self._compute_allocations(req, mapping)
+            # store the substrate allocation
             current_new_allocations.append(mapping_allocations)
 
-        #make variables accessible
+        # make variables accessible
         self.model.update()
         # capacity constraints and the allocation calculations are the same at the cost variant, so this should not change
         for index, new_var in enumerate(current_new_variables):
-            #handle allocations
+            # handle allocations
             corresponding_allocation = current_new_allocations[index]
             for sres, alloc in corresponding_allocation.iteritems():
                 if sres not in self.capacity_constraints.keys():
@@ -261,8 +274,10 @@ class RandRoundSepLPOptDynVMPCollectionForFogModel(twm.RandRoundSepLPOptDynVMPCo
                 constr = self.capacity_constraints[sres]
                 self.model.chgCoeff(constr, new_var, alloc)
 
+            #the new variable corresponding to its request's embedding bound
             self.model.chgCoeff(self.embedding_bound[req], new_var, 1.0)
 
+        # add only the first len(current_new_variables) mappings from the ordered list
         self.mappings_of_requests[req].extend(mapping_list[:len(current_new_variables)])
         self.allocations_of_mappings[req].extend(current_new_allocations[:len(current_new_variables)])
         self.mapping_variables[req].extend(current_new_variables)
