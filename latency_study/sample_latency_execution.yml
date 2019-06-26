@@ -15,5 +15,5 @@ RUN_PARAMETERS:
           rounding_samples_per_lp_recomputation_mode : [ !!python/tuple [ !!python/tuple ["NONE", 500] ] ]
           number_initial_mappings_to_compute : [50]
           number_further_mappings_to_add : [10]
-          latency_approximation_factor : [1]
-          latency_approximation_limit : [0.4]
+          latency_approximation_factor : [10]
+          latency_approximation_limit : [10]

@@ -33,6 +33,8 @@ from heapq import heappush, heappop
 import enum
 from collections import namedtuple
 
+import time
+
 try:
     import cPickle as pickle
 except ImportError:
@@ -525,7 +527,15 @@ class ShortestValidPathsComputerWithoutLatencies(object):
         self._compute_valid_edge_mapping_costs()
 
     def recompute_with_new_costs(self, new_edge_costs):
-        self.edge_costs = new_edge_costs
+        # self.edge_costs = new_edge_costs
+
+        for key, value in new_edge_costs.iteritems():
+            if value < 0:
+                print "ERROR: value < 0, {}:  {}".format(key, value)
+                self.edge_costs[key] = -value
+            else:
+                self.edge_costs[key] = value
+
         self.compute()
 
     def _prepare_numeric_graph(self):
@@ -609,11 +619,22 @@ class ShortestValidPathsComputerLORENZ(object):
         self.valid_mapping_restriction_computer = valid_mapping_restriction_computer
         self.edge_costs = edge_costs
         self.edge_latencies = edge_latencies
+        # self.edge_latencies = {sedge: max(lat, -lat) for sedge, lat in edge_latencies.iteritems()}
         self.epsilon = epsilon
         self.limit = limit
         self.edge_mapping_invalidities = False
         self.latency_limit_overstepped = False
         self.FAIL = (None, np.nan, np.nan)
+
+
+        for sedge, lat in edge_latencies:
+            if lat < 0:
+                print "ERROR!! lat < 0:  ", lat
+
+        for sedge, lat in edge_costs:
+            if lat < 0:
+                print "ERROR!! cost < 0:  ", lat
+
 
     def compute(self):
         self.number_of_nodes = len(self.substrate.nodes)
@@ -631,7 +652,15 @@ class ShortestValidPathsComputerLORENZ(object):
         self._compute_all_pairs()
 
     def recompute_with_new_costs(self, new_edge_costs):
-        self.edge_costs = new_edge_costs
+        # self.edge_costs = new_edge_costs
+
+        for sedge, cost in new_edge_costs.iteritems():
+
+            if cost < 0:
+                print "WARNING: cost < 0 in recompute.  ", cost
+
+            self.edge_costs[sedge] = max(cost, -cost)
+
         self.compute()
 
     def recompute_with_new_latencies(self, new_edge_latencies):
@@ -671,7 +700,13 @@ class ShortestValidPathsComputerLORENZ(object):
         for i in range(min_c_tilde, U_tilde+1):
             for snode in self.substrate.nodes:
                 n = self.snode_id_to_num_id[snode]
-                distances[n][i] = distances[n][i-1]
+                # try:
+                #     distances[n][i] = distances[n][i-1]
+                # except:
+                #     with open("pickles/lorenz.p", "wb") as f:
+                #         pickle.dump(self, f, protocol=pickle.HIGHEST_PROTOCOL)
+                #         print "pickle saved"
+
                 for e in self.substrate.in_edges[snode]:
                     if e in self.current_valid_edge_set and c_tilde[e] <= i:
                         u, _ = e
@@ -684,14 +719,15 @@ class ShortestValidPathsComputerLORENZ(object):
             if distances[num_target_node][i] <= self.limit:
                 # retrace path from t to s
                 n = num_target_node
-                path = [self.num_id_to_snode_id[num_target_node]]
+                path = []
                 total_costs = 0
                 while n != num_source_node:
-                    end = self.num_id_to_snode_id[n]
-                    n = self.predecessor[n]
-                    sedge = (self.num_id_to_snode_id[n], end)
+                    pred = self.predecessor[n]
+                    sedge = self.num_id_to_snode_id[pred], self.num_id_to_snode_id[n]
+                    path.append(sedge)
                     total_costs += self.edge_costs[sedge]
-                    path = [self.num_id_to_snode_id[n]] + path
+                    n = pred
+                path = list(reversed(path))
 
                 return path, distances[num_target_node][i], total_costs
 
@@ -717,10 +753,12 @@ class ShortestValidPathsComputerLORENZ(object):
                     sorted(self.current_valid_edge_set, key=lambda i: self.edge_costs[i])]))
 
 
-    def _shortest_path_latencies_limited(self, limit, num_source_node, num_target_node):
+    def _shortest_path_latencies_limited(self, limit, num_source_node, num_target_node, retPath=False):
         queue = [(0, num_source_node)]
         self.temp_latencies.fill(np.inf)
         self.temp_latencies[num_source_node] = 0
+        if retPath:
+            preds = [-1] * self.number_of_nodes
 
         while queue:
             total_latencies, num_current_node = heappop(queue)
@@ -737,14 +775,29 @@ class ShortestValidPathsComputerLORENZ(object):
                         if total_latencies + lat < self.temp_latencies[num_endpoint]:
                             self.temp_latencies[num_endpoint] = total_latencies + lat
                             heappush(queue, (total_latencies + lat, num_endpoint))
+                            if retPath:
+                                preds[num_endpoint] = num_current_node
 
-        return self.temp_latencies[num_target_node]
+        if retPath:
+            n = num_target_node
+            path = []
+            total_costs = 0
+            while n != num_source_node:
+                pred = preds[n]
+                sedge = self.num_id_to_snode_id[pred], self.num_id_to_snode_id[n]
+                path.append(sedge)
+                total_costs += self.edge_costs[sedge]
+                n = pred
+            path = list(reversed(path))
+            return path, self.temp_latencies[num_target_node], total_costs
+        else:
+            return self.temp_latencies[num_target_node]
 
 
     def _approx_latencies(self, num_source_node, num_target_node):
 
         if num_source_node == num_target_node:
-            return [self.num_id_to_snode_id[num_source_node]], 0, 0
+            return [], 0, 0
 
         low, high = -1, len(self.edge_levels_sorted)-1
 
@@ -756,6 +809,10 @@ class ShortestValidPathsComputerLORENZ(object):
                 low = j
 
         lower = self.edge_levels_sorted[high]
+
+        if lower == 0:
+            return self._shortest_path_latencies_limited(0, num_source_node, num_target_node, True)
+
         upper = lower * self.number_of_nodes
         return self._Hassin(lower, upper, num_source_node, num_target_node)
 
@@ -764,8 +821,11 @@ class ShortestValidPathsComputerLORENZ(object):
 
         for edge_set_index in range(self.number_of_valid_edge_sets):
 
+            #TODO: move to preprocessing
             self.current_valid_edge_set = self.edge_set_id_to_edge_set[edge_set_index]
+            # start_time = time.time()
             self.edge_levels_sorted = self._sort_edges_distinct()
+            # print "time for sorting edges:  ", (time.time() - start_time)
 
             for num_source_node in range(self.number_of_nodes):
 
@@ -774,7 +834,7 @@ class ShortestValidPathsComputerLORENZ(object):
                 for num_target_node in range(self.number_of_nodes):
 
                     if len(self.current_valid_edge_set) == 0:
-                        path, lat, costs = None, np.nan, np.nan
+                        path, lat, costs = self.FAIL
                     else:
                         self.predecessor.fill(-1)
                         path, lat, costs = self._approx_latencies(num_source_node, num_target_node)
@@ -794,9 +854,11 @@ class ShortestValidPathsComputerLORENZ(object):
 
         request_edge_to_edge_set_id = self.valid_mapping_restriction_computer.get_reqedge_to_edgeset_id_mapping()
 
+        # start_time = time.time()
         for request_edge, edge_set_id_to_edge_set in request_edge_to_edge_set_id.iteritems():
             self.valid_sedge_costs[request_edge] = self.valid_sedge_costs[edge_set_id_to_edge_set]
             self.valid_sedge_paths[request_edge] = self.valid_sedge_paths[edge_set_id_to_edge_set]
+        # print "time for aggregating:  ", (time.time() - start_time)
 
 
 
@@ -1535,9 +1597,13 @@ class OptimizedDynVMP(object):
         self._initialize_costs(initial_snode_costs, initial_sedge_costs)
 
         self.vmrc = ValidMappingRestrictionComputer(substrate=substrate, request=request)
-        self.svpc = ShortestValidPathsComputer(substrate=substrate, valid_mapping_restriction_computer=self.vmrc,
-                                               edge_costs=self.sedge_costs, edge_latencies=self.sedge_latencies,
-                                               epsilon=epsilon, limit=limit)
+        self.svpc = ShortestValidPathsComputerLORENZ(substrate, self.vmrc, self.sedge_costs, self.sedge_latencies, epsilon, limit)
+
+            # (substrate=substrate, request=None, valid_mapping_restriction_computer=self.vmrc,
+            #                                    edge_costs=self.sedge_costs)#, edge_latencies=self.sedge_latencies,
+                                               # epsilon=epsilon, limit=limit)
+
+        self.counter = [20, 26]
 
     def _initialize_costs(self, snode_costs, sedge_costs):
         if snode_costs is None:
@@ -1566,18 +1632,44 @@ class OptimizedDynVMP(object):
         self.vmrc.compute()
 
         print ("\t\t\t\t\t\t\t\t" if os.getpid()%2==0 else ""), "finding shortest paths for {}".format(self.request.name)
-        self.svpc.compute()
 
-        # try:
-        #     with open("pickles/{}_mappings.p".format(self.request.name), 'rb') as handle:
-        #         self.svpc = pickle.load(handle)
-        # except Exception:
-        #     print "pickle '{}_mappings.p' could not be loaded, exiting".format(self.request.name)
-        #     exit(-1)
-
-        with open("pickles/{}_mappings.p".format(self.request.name), "wb") as f:
+        with open("pickles/before/{}_mappings_{}.p".format(self.request.name, os.getpid()%2), "wb") as f:
             pickle.dump(self.svpc, f, protocol=pickle.HIGHEST_PROTOCOL)
             print "pickle saved"
+
+        start_time = time.time()
+        self.svpc.compute()
+        print ("\t\t\t\t\t\t\t\t" if os.getpid()%2==0 else ""), "\t time: ", time.time() - start_time
+
+        with open("pickles/after/{}_mappings_{}.p".format(self.request.name, os.getpid()%2), "wb") as f:
+            pickle.dump(self.svpc, f, protocol=pickle.HIGHEST_PROTOCOL)
+            print "pickle saved"
+
+
+        # b = os.getpid()%2
+        #
+        # if self.counter[b] > 0:
+        #     try:
+        #         with open("pickles/{}_mappings_{}.p".format(self.request.name, b), 'rb') as handle:
+        #             self.svpc = pickle.load(handle)
+        #         self.counter[b] -= 1
+        #     except Exception:
+        #         print "pickle '{}_mappings_{}.p' could not be loaded, computing new".format(self.request.name, b)
+        #         self.svpc.compute()
+
+
+        # if os.getpid()%2==0 and self.counter > 0:
+        #     try:
+        #         with open("pickles/{}_mappings.p".format(self.request.name), 'rb') as handle:
+        #             self.svpc = pickle.load(handle)
+        #         self.counter -= 1
+        #     except Exception:
+        #         print "pickle '{}_mappings.p' could not be loaded, computing new".format(self.request.name)
+        #         self.svpc.compute()
+
+        # with open("pickles/{}_mappings_{}.p".format(self.request.name, os.getpid()%2), "wb") as f:
+        #     pickle.dump(self.svpc, f, protocol=pickle.HIGHEST_PROTOCOL)
+        #     print "pickle saved"
 
 
         self.sorted_snodes = sorted(list(self.substrate.nodes))
@@ -1688,6 +1780,7 @@ class OptimizedDynVMP(object):
         #     u = pred
         # path = list(reversed(path))
         return self.svpc.valid_sedge_paths[reqedge][source_mapping][target_mapping]
+        # return path
 
     def _recover_node_mapping(self, root_mapping_index = None):
         fixed_node_mappings = {}
@@ -2062,7 +2155,7 @@ class SeparationLP_OptDynVMP(object):
         opt_cost = dynvmp_instance.get_optimal_solution_cost()
         current_new_allocations = []
         current_new_variables = []
-        self.logger.debug("Objective when introucding new columns was {}".format(opt_cost))
+        self.logger.debug("Objective when introducing new columns was {}".format(opt_cost))
         (costs, indices) = dynvmp_instance.get_ordered_root_solution_costs_and_mapping_indices(maximum_number_of_solutions_to_return=maximum_number_of_columns_to_introduce)
         mapping_list = dynvmp_instance.recover_list_of_mappings(indices)
         self.logger.debug("Will iterate mapping list {}".format(req.name))

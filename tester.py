@@ -404,9 +404,13 @@ def inpsect_pickles():
 
     svpc = None
 
-    with open('latency_study/pickles/vnet_1_mappings.p', 'rb') as handle:
-        svpc = pickle.load(handle)
+    with open('latency_study/pickles/before/vnet_1_mappings_0.p', 'rb') as handle:
+        before = pickle.load(handle)
 
+    with open('latency_study/pickles/after/vnet_1_mappings_0.p', 'rb') as handle:
+        after = pickle.load(handle)
+
+    before.compute()
 
     print "done"
 
