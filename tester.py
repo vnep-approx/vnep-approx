@@ -9,6 +9,8 @@ from test.treewidth_model.test_data.request_test_data import example_requests, c
 from vnep_approx.treewidth_model import ValidMappingRestrictionComputer
 from vnep_approx.treewidth_model import ShortestValidPathsComputer as SVPC
 from vnep_approx.treewidth_model import ShortestValidPathsComputerWithoutLatencies as SVPC_given
+from vnep_approx.backup.lorenz import ShortestValidPathsComputerLORENZ as SVPC_Lorenz
+from vnep_approx.backup.lorenz_optimized import ShortestValidPathsComputerLORENZ_OPTIMIZED as SVPC_LORENZ_OPT
 from vnep_approx.latencies_approx_goel import ShortestValidPathsComputerWithLatencies as SVPC_goel
 
 # from vnep_approx.deferred.extendedgraph import ExtendedGraph
@@ -404,18 +406,130 @@ def inpsect_pickles():
 
     svpc = None
 
-    with open('latency_study/pickles/before/vnet_1_mappings_0.p', 'rb') as handle:
+    with open('latency_study/pickles/before/vnet_2_mappings_0.p', 'rb') as handle:
         before = pickle.load(handle)
 
-    with open('latency_study/pickles/after/vnet_1_mappings_0.p', 'rb') as handle:
+    with open('latency_study/pickles/after/vnet_2_mappings_0.p', 'rb') as handle:
         after = pickle.load(handle)
 
+    print "loaded"
+
+    before.valid_mapping_restriction_computer.compute()
+
+    before.limit = 10
+    before.epsilon = 1
+
+    # for key,value in before.edge_latencies.iteritems():
+    #     if value == 0:
+    #         before.edge_latencies[key] = 0.1
+
+    start_time = time.time()
     before.compute()
+    print "time: ", time.time() - start_time
+    print "done"
+
+def check_substrates():
+
+    with open('latency_study/pickles/before/vnet_1_mappings_0.p', 'rb') as handle:
+        svpc = pickle.load(handle)
+
+    with open('latency_study/pickles/before/vnet_2_mappings_0.p', 'rb') as handle:
+        svpc2 = pickle.load(handle)
+
+    print svpc.substrate == svpc2.substrate
+
+
+def compare():
+    with open('latency_study/pickles/before/vnet_1_mappings_0.p', 'rb') as handle:
+        lorenz = pickle.load(handle)
+
+    print lorenz.limit
+
+    goel = SVPC(lorenz.substrate, lorenz.valid_mapping_restriction_computer,
+                lorenz.edge_costs, lorenz.edge_latencies, lorenz.epsilon, 10)
+
+    print "loaded"
+
+    lorenz.epsilon = 1
+    goel.epsilon = 1
+
+    start_time = time.time()
+    goel.compute()
+    print "time GOEL:\t\t ", time.time() - start_time
+
+    start_time = time.time()
+    lorenz.compute()
+    print "time LORENZ:\t ", time.time() - start_time
 
     print "done"
+
+
+def check_optimization():
+
+    limit, epsilon = 10, 1
+
+    with open('latency_study/pickles/before/vnet_1_mappings_0.p', 'rb') as handle:
+        svpc = pickle.load(handle)
+
+    lorenz = SVPC_Lorenz(svpc.substrate, svpc.valid_mapping_restriction_computer, svpc.edge_costs, svpc.edge_latencies, epsilon, limit)
+    optimized = SVPC_LORENZ_OPT(svpc.substrate, svpc.valid_mapping_restriction_computer, svpc.edge_costs, svpc.edge_latencies, epsilon, limit)
+
+
+    # with open('pickles/lorenz.p', 'rb') as handle:
+    #     lorenz = pickle.load(handle)
+    #
+    # with open('pickles/opt.p', 'rb') as handle:
+    #     optimized = pickle.load(handle)
+
+
+    print "setup"
+
+    # ---------------------         170 s           ---------------
+    start_time = time.time()
+    lorenz.compute()
+    print "time LORENZ:\t\t ", time.time() - start_time
+    #
+    #
+    # with open('pickles/lorenz.p', 'wb') as handle:
+    #     pickle.dump(lorenz, handle, protocol=pickle.HIGHEST_PROTOCOL)
+
+    start_time = time.time()
+    optimized.compute()
+    print "time OPTIMIZED:\t ", time.time() - start_time
+
+
+    # with open('pickles/opt.p', 'wb') as handle:
+    #     pickle.dump(optimized, handle, protocol=pickle.HIGHEST_PROTOCOL)
+
+    # first = optimized.valid_sedge_paths
+    # second = lorenz.valid_sedge_paths
+    #
+    # print cmp(optimized.valid_sedge_paths, lorenz.valid_sedge_paths)
+    # print cmp(optimized.valid_sedge_costs, lorenz.valid_sedge_costs)
+    #
+    # dict_differences(first, second)
+
+
+    print "done"
+
+
+
+def dict_differences(first, second, d=1):
+    for key, value in first.iteritems():
+        if not key in second.keys():
+            print key, " not in ", second
+
+        if d <= 1:
+            dict_differences(value, second[key], d=d+1)
+        else:
+            if cmp(second[key], value) != 0:
+                print "ERROR: opt[", key, "] = \n\t", value, " != \n\t", second[key], " = lor[", key, "]"
 
 
 if __name__ == "__main__":
     # run_test()
     # inspect_svpc()
-    inpsect_pickles()
+    # inpsect_pickles()
+    # compare()
+    # check_substrates()
+    check_optimization()

@@ -114,8 +114,9 @@ class ShortestValidPathsComputerWithLatencies(object):
         # return FAIL
 
         # unfortunately has different size for each call to SPPP - (maybe use submatrix?)
-        # TODO: Consider not callinf full, but empty (doesnt set value) and setting only fist column
+        # TODO: Consider not calling full, but empty (doesnt set value) and setting only fist column
         # TODO: source node does not need a line -> will always be zero, just check is start point is start_node!!
+        # TODO: make distances: n x max_c_tilde (most we ever go back)
         distances = np.full((self.number_of_nodes, U_tilde+1), np.inf)
         distances[num_source_node][0] = 0
         self.predecessor[num_source_node] = num_source_node
