@@ -884,11 +884,10 @@ class ShortestValidPathsComputerLORENZ(object):
     def get_valid_sedge_costs_from_edgesetindex(self, edge_set_index, reqedge):
         return self.valid_sedge_costs[edge_set_index].get(reqedge, np.nan)
 
-    def get_valid_sedge_path(self, request_edge):
-        head, tail = request_edge
+    def get_valid_sedge_path(self, request_edge, source_mapping, target_mapping):
         request_edge_to_edge_set_id = self.valid_mapping_restriction_computer.get_reqedge_to_edgeset_id_mapping()
         edge_set_id_to_edge_set = request_edge_to_edge_set_id[request_edge]
-        return self.valid_sedge_paths[edge_set_id_to_edge_set][head].get(tail, None)
+        return self.valid_sedge_paths[edge_set_id_to_edge_set][source_mapping].get(target_mapping, None)
 
 
 
@@ -1668,17 +1667,17 @@ class OptimizedDynVMP(object):
 
         print ("\t\t\t\t\t\t\t\t" if os.getpid()%2==0 else ""), "finding shortest paths for {}".format(self.request.name)
 
-        with open("pickles/before/{}_mappings_{}.p".format(self.request.name, os.getpid()%2), "wb") as f:
-            pickle.dump(self.svpc, f, protocol=pickle.HIGHEST_PROTOCOL)
-            print "pickle saved"
-
-        start_time = time.time()
+        # with open("pickles/before/{}_mappings_{}.p".format(self.request.name, os.getpid()%2), "wb") as f:
+        #     pickle.dump(self.svpc, f, protocol=pickle.HIGHEST_PROTOCOL)
+        #     print "pickle saved"
+        #
+        # start_time = time.time()
         self.svpc.compute()
-        print ("\t\t\t\t\t\t\t\t" if os.getpid()%2==0 else ""), "\t time: ", time.time() - start_time
-
-        with open("pickles/after/{}_mappings_{}.p".format(self.request.name, os.getpid()%2), "wb") as f:
-            pickle.dump(self.svpc, f, protocol=pickle.HIGHEST_PROTOCOL)
-            print "pickle saved"
+        # print ("\t\t\t\t\t\t\t\t" if os.getpid()%2==0 else ""), "\t time: ", time.time() - start_time
+        #
+        # with open("pickles/after/{}_mappings_{}.p".format(self.request.name, os.getpid()%2), "wb") as f:
+        #     pickle.dump(self.svpc, f, protocol=pickle.HIGHEST_PROTOCOL)
+        #     print "pickle saved"
 
 
         # b = os.getpid()%2
@@ -1819,7 +1818,7 @@ class OptimizedDynVMP(object):
         # return self.svpc.valid_sedge_paths[reqedge][source_mapping][target_mapping]
         # return path
 
-        return self.svpc.get_valid_sedge_path(reqedge)
+        return self.svpc.get_valid_sedge_path(reqedge, source_mapping, target_mapping)
 
 
     def _recover_node_mapping(self, root_mapping_index = None):
