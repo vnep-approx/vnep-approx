@@ -32,6 +32,28 @@ from alib import datamodel
 EPSILON = 0.00001
 
 
+class RandRoundSepLPOptDynVMPCollectionResultForCostVariant(twm.RandRoundSepLPOptDynVMPCollectionResult):
+
+    def __init__(self, scenario, lp_computation_information, overall_feasible):
+        super(RandRoundSepLPOptDynVMPCollectionResultForCostVariant, self).__init__(scenario, lp_computation_information, overall_feasible)
+        # NOTE: The overall_feasible is not used currently anywhere for meaningful reason.
+        # A None object is returned in case the scenario is not feasible, which is handled by the execution framework.
+
+    def get_solution(self):
+        # TODO: we might not need overall_feasible parameter, as we return None at the self(algorithm instance).result... But we might
+        # need it for explicit calculation of feasibility ratio
+        if self.overall_feasible:
+            return super(RandRoundSepLPOptDynVMPCollectionResultForCostVariant, self).get_solution()
+        else:
+            raise ValueError("Solutions cannot be retrieved from an infeasible cost variant result")
+
+    def _cleanup_references_raw(self, original_scenario):
+        if self.overall_feasible:
+            super(RandRoundSepLPOptDynVMPCollectionResultForCostVariant, self)._cleanup_references_raw(original_scenario)
+        else:
+            raise ValueError("References cannot be cleaned up for infeasible cost variant result")
+
+
 class RandRoundSepLPOptDynVMPCollectionForFogModel(twm.RandRoundSepLPOptDynVMPCollection):
 
     ALGORITHM_ID = "RandRoundSepLPOptDynVMPCollectionForFogModel"
@@ -148,7 +170,8 @@ class RandRoundSepLPOptDynVMPCollectionForFogModel(twm.RandRoundSepLPOptDynVMPCo
         # this feasibility checking is needed!
         if not self.profit_variant_algorithm_instance.status.hasFeasibleStatus() or\
           math.fabs(self.profit_variant_algorithm_instance.status.getObjectiveValue() - len(self.scenario.requests)) > EPSILON:
-            raise ValueError("Scenario is unfeasible, not all requests can be mapped at the same time!")
+            self.logger.warn("Scenario is unfeasible, not all requests can be mapped at the same time!")
+            return False
         for req, req_profit_variant in zip(self.requests, self.profit_variant_algorithm_instance.requests):
             for index, gurobi_var  in enumerate(self.profit_variant_algorithm_instance.mapping_variables[req_profit_variant]):
                 valid_mappings_of_req = self.profit_variant_algorithm_instance.mappings_of_requests[req_profit_variant]
@@ -182,6 +205,23 @@ class RandRoundSepLPOptDynVMPCollectionForFogModel(twm.RandRoundSepLPOptDynVMPCo
                     self.model.chgCoeff(gurobi_constr, gurobi_var, allocations_of_sinlge_valid_mapping[sres])
         # apply coefficient changes
         self.model.update()
+        # if we passed through the initial checking the scenario shuold be feasible
+        return True
+
+    def construct_results_record(self, scenario, sep_lp_solution, overall_feasible):
+        """
+        Must create the self.result variable.
+
+        :param scenario:
+        :param sep_lp_solution:
+        :param overall_feasible:
+        :return:
+        """
+        if not overall_feasible:
+            self.result = None
+        else:
+            # TODO: save additional info for the Cost variant (e.g. objective value, others to plot.)
+            self.result = RandRoundSepLPOptDynVMPCollectionResultForCostVariant(scenario, sep_lp_solution, overall_feasible)
 
     def perform_separation_and_introduce_new_columns(self, current_objective, ignore_requests=[]):
         new_columns_generated = False
@@ -248,10 +288,9 @@ class RandRoundSepLPOptDynVMPCollectionForFogModel(twm.RandRoundSepLPOptDynVMPCo
         for index, mapping in enumerate(mapping_list):
             if costs[index] > cutoff:
                 break
-            # TODO (NB): Which cost function should calculating the objective coefficient should use? the original substrate cost or the
-            # iteratively updated dual costs? (FOR NOW assume the original)
             # compute corresponding substrate allocation
             mapping_allocations = self._compute_allocations(req, mapping)
+            # the original substrate graph costs must be used because we are adding variables to the primal's objective
             total_cost_of_mapping = self.calculate_total_cost_of_single_valid_mapping(mapping_allocations)
             varname = "f_req[{}]_k[{}]".format(req.name, len(self.mappings_of_requests[req]) + index)
             new_var = self.model.addVar(lb=0.0, ub=1.0,

@@ -1877,10 +1877,14 @@ RandomizedRoundingSolution = namedtuple("RandomizedRoundingSolution", ["solution
 
 class RandRoundSepLPOptDynVMPCollectionResult(modelcreator.AlgorithmResult):
 
-    def __init__(self, scenario, lp_computation_information):
+    def __init__(self, scenario, lp_computation_information, overall_feasible=True):
         self.scenario = scenario
         self.lp_computation_information = lp_computation_information
         self.solutions = {}
+        # a properly defined profit maximization is always feasible
+        # NOTE: This is not used currently anywhere for meaningful reason.
+        # A None object is returned in case the scenario is not feasible, which is handled by the execution framework.
+        self.overall_feasible = overall_feasible
 
     def add_solution(self, rounding_order, lp_recomputation_mode, solution):
         identifier = (lp_recomputation_mode, rounding_order)
@@ -2305,7 +2309,7 @@ class RandRoundSepLPOptDynVMPCollection(object):
         """
         Initialize the objective function by introducing some variables for all of the requests.
 
-        :return:
+        :return: True, whether an initial mappings have been found (should always find)
         """
         for req in self.requests:
             self.logger.debug("Getting first mappings for request {}".format(req.name))
@@ -2320,6 +2324,25 @@ class RandRoundSepLPOptDynVMPCollection(object):
                 self.introduce_new_columns(req,
                                            maximum_number_of_columns_to_introduce=self.number_initial_mappings_to_compute)
         self.model.update()
+        return True
+
+    def construct_results_record(self, scenario, sep_lp_solution, overall_feasible):
+        """
+        Must create the self.result variable with an instance of RandRoundSepLPOptDynVMPCollectionResult.
+
+        :param scenario:
+        :param sep_lp_solution:
+        :param overall_feasible:
+        :return:
+        """
+        if not overall_feasible:
+            self.logger.exception("No feasible mapping found for profit maximization! "
+                                  "This should not happen with proper scenario generation!")
+            self.result = None
+        else:
+            self.result = RandRoundSepLPOptDynVMPCollectionResult(scenario=scenario,
+                                                                  lp_computation_information=sep_lp_solution,
+                                                                  overall_feasible=overall_feasible)
 
     def compute_solution(self):
         ''' Abstract function computing an integral solution to the model (generated before).
@@ -2332,7 +2355,10 @@ class RandRoundSepLPOptDynVMPCollection(object):
         time_optimization_start = time.time()
 
         #do the magic here
-        self.get_first_mappings_for_requests()
+        # if no initial mappings are found, we need to terminate
+        if not self.get_first_mappings_for_requests():
+            self.construct_results_record(self.scenario, None, False)
+            return self.result
 
         new_columns_generated = True
         counter = 0
@@ -2399,8 +2425,8 @@ class RandRoundSepLPOptDynVMPCollection(object):
                                                objVal,
                                                number_of_generated_mappings)
 
-        self.result = RandRoundSepLPOptDynVMPCollectionResult(scenario=self.scenario,
-                                                              lp_computation_information=sep_lp_solution)
+        # Construct results record, sets self.result
+        self.construct_results_record(self.scenario, sep_lp_solution, True)
 
         self.perform_rounding()
         #self.logger.info("Best solution by rounding is {}".format(best_solution))
