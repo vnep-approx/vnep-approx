@@ -917,7 +917,7 @@ class ShortestValidPathsComputer(object):
                 min_lat = value
 
         for key, value in edge_latencies.items():
-            self.edge_latencies[key] = max(int( (100 * value - 100 * min_lat) / (max_lat - min_lat)), 1)
+            self.edge_latencies[key] = max(int( (100 * (value - min_lat)) / (max_lat - min_lat)), 1)
 
         self.limit = 100 * limit / (max_lat - min_lat)
 
@@ -925,7 +925,7 @@ class ShortestValidPathsComputer(object):
         # for lat in sorted(self.edge_latencies.values(), reverse=True)[:self.substrate.get_number_of_nodes()]:
         #     total_latencies += lat
 
-        self.limit = 900 # limit * total_latencies
+        # self.limit = 900 # limit * total_latencies
 
 
     def compute(self):
@@ -988,6 +988,7 @@ class ShortestValidPathsComputer(object):
         self.preds = np.full((self.number_of_nodes, tau+1), -1, dtype=np.int32)
         self.preds[num_source_node][0] = num_source_node
 
+        self._handle_zero_delay_links(num_source_node, tau_modified_latencies, 0)
 
         for t in range(1, tau+1):
             for num_current_node in range(self.number_of_nodes):
@@ -1063,7 +1064,7 @@ class ShortestValidPathsComputer(object):
         self._preprocess(num_source_node)
         # TODO: make sure, infeasible nodes are never used
 
-        tau = int(self.limit) / 50 + 1 # max(int(math.log(self.limit) / 2), 1)
+        tau = 2#int(self.limit) / 50 + 1 # max(int(math.log(self.limit) / 2), 1)
 
         self.paths = {self.snode_id_to_num_id[snode]: None for snode in self.substrate.nodes}
 
@@ -1071,7 +1072,7 @@ class ShortestValidPathsComputer(object):
 
         while not approx_holds:
 
-            print " -------------------- tau: ", tau, " \t\t --------------"
+            # print " -------------------- tau: ", tau, " \t\t --------------"
 
             # if 1500 > tau > 1000:
             #     with open("pickles/svpc.p", "wb") as f:
@@ -1196,8 +1197,6 @@ class ShortestValidPathsComputer(object):
         for request_edge, edge_set_id_to_edge_set in request_edge_to_edge_set_id.iteritems():
             self.valid_sedge_costs[request_edge] = self.valid_sedge_costs[edge_set_id_to_edge_set]
             self.valid_sedge_paths[request_edge] = self.valid_sedge_paths[edge_set_id_to_edge_set]
-
-
 
 
 
@@ -2152,6 +2151,7 @@ class SeparationLP_OptDynVMP(object):
         self.dynvmp_instances = {req : None for req in self.requests}
         self.dynvmp_runtimes_initialization = {req: list() for req in self.requests}
 
+        # TODO calculate shortest paths for all reqests at once
         for req in self.requests:
             self.logger.debug("Initializing DynVMP Instance for request {}".format(req))
             dynvmp_init_time = time.time()

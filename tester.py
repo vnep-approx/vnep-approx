@@ -7,11 +7,12 @@ from alib import datamodel
 from test.treewidth_model.test_data.substrate_test_data import create_test_substrate
 from test.treewidth_model.test_data.request_test_data import example_requests, create_test_request
 from vnep_approx.treewidth_model import ValidMappingRestrictionComputer
-from vnep_approx.treewidth_model import ShortestValidPathsComputer as SVPC
+from vnep_approx.treewidth_model import ShortestValidPathsComputer as SVPC_goel
 from vnep_approx.treewidth_model import ShortestValidPathsComputerWithoutLatencies as SVPC_given
 from vnep_approx.backup.lorenz import ShortestValidPathsComputerLORENZ as SVPC_Lorenz
-from vnep_approx.backup.lorenz_optimized import ShortestValidPathsComputerLORENZ_OPTIMIZED as SVPC_LORENZ_OPT
-from vnep_approx.latencies_approx_goel import ShortestValidPathsComputerWithLatencies as SVPC_goel
+from vnep_approx.backup.lorenz_optimized import ShortestValidPathsComputerLORENZ as SVPC_LORENZ_OPT
+
+from vnep_approx.backup.goel_optimized import ShortestValidPathsComputer as SVPC_goel_OPT
 
 # from vnep_approx.deferred.extendedgraph import ExtendedGraph
 # from vnep_approx.deferred.extended_graph_visualizer import ExtendedGraphVisualizer
@@ -181,7 +182,7 @@ def run_test():
     print "\n\n-- run --"
 
     print "\n\n--------- mine ----------"
-    svpcwl_goel = SVPC(sub, vmrc, edge_costs, edge_latencies, epsilon=0.5, limit=4000)
+    svpcwl_goel = SVPC_goel(sub, vmrc, edge_costs, edge_latencies, epsilon=0.5, limit=4000)
     start_mine = time.time()
     # svpcwl_goel.compute()
     my_time = time.time() - start_mine
@@ -197,7 +198,7 @@ def run_test():
 
     print "\n\n--------- my Lorenz ----------"
 
-    svpcwl_lorenz = SVPC(sub, vmrc, edge_costs, edge_latencies, epsilon=0.1, limit=1000)
+    svpcwl_lorenz = SVPC_Lorenz(sub, vmrc, edge_costs, edge_latencies, epsilon=0.1, limit=1000)
     start_mine2 = time.time()
     # svpcwl_lorenz.compute()
     my_time2 = time.time() - start_mine2
@@ -388,7 +389,7 @@ def inspect_svpc():
 
     vmrc = ValidMappingRestrictionComputer(sub, req)
 
-    svpcwl = SVPC(sub, vmrc, )
+    svpcwl = SVPC_goel(sub, vmrc, )
 
     svpcwl.compute()
 
@@ -463,8 +464,7 @@ def compare():
 
     print "done"
 
-
-def check_optimization():
+def check_optimization_lorenz():
 
     limit, epsilon = 10, 1
 
@@ -474,6 +474,47 @@ def check_optimization():
     lorenz = SVPC_Lorenz(svpc.substrate, svpc.valid_mapping_restriction_computer, svpc.edge_costs, svpc.edge_latencies, epsilon, limit)
     optimized = SVPC_LORENZ_OPT(svpc.substrate, svpc.valid_mapping_restriction_computer, svpc.edge_costs, svpc.edge_latencies, epsilon, limit)
 
+    print "setup"
+
+    start_time = time.time()
+    lorenz.compute()
+    print "time LORENZ:\t\t ", time.time() - start_time
+
+    start_time = time.time()
+    optimized.compute()
+    print "time OPTIMIZED:\t ", time.time() - start_time
+
+
+    for attr in ["paths", "costs"]:
+        first = getattr(optimized, "valid_sedge_" + attr)
+        second = getattr(lorenz, "valid_sedge_" + attr)
+        dict_differences(first, second, False)
+
+    print "done"
+
+
+
+def check_optimization_goel():
+
+    limit, epsilon = 0.01, 1
+
+    with open('latency_study/pickles/before/vnet_1_mappings_0.p', 'rb') as handle:
+        svpc = pickle.load(handle)
+
+    goel = SVPC_goel(svpc.substrate, svpc.valid_mapping_restriction_computer, svpc.edge_costs, svpc.edge_latencies, epsilon, limit)
+    optimized = SVPC_goel_OPT(svpc.substrate, svpc.valid_mapping_restriction_computer, svpc.edge_costs, svpc.edge_latencies, epsilon, limit)
+
+
+    plain = SVPC_given(svpc.substrate, None, svpc.valid_mapping_restriction_computer, svpc.edge_costs)
+
+    # given = SVPC_given (svpc.substrate, None, svpc.valid_mapping_restriction_computer, svpc.edge_costs)
+    # given.compute()
+
+
+    # goel.limit = 200
+    # optimized.limit = 200
+
+    print optimized.limit
 
     # with open('pickles/lorenz.p', 'rb') as handle:
     #     lorenz = pickle.load(handle)
@@ -486,8 +527,9 @@ def check_optimization():
 
     # ---------------------         170 s           ---------------
     start_time = time.time()
-    lorenz.compute()
-    print "time LORENZ:\t\t ", time.time() - start_time
+    goel.compute()
+    time_goel = time.time() - start_time
+    print "time GOEL:\t\t ", time_goel
     #
     #
     # with open('pickles/lorenz.p', 'wb') as handle:
@@ -495,35 +537,69 @@ def check_optimization():
 
     start_time = time.time()
     optimized.compute()
-    print "time OPTIMIZED:\t ", time.time() - start_time
+    time_optimized = time.time() - start_time
+    print "time OPTIMIZED:\t ", time_optimized
 
+
+
+    start_time = time.time()
+    plain.compute()
+    time_plain = time.time() - start_time
+    print "time PLAIN:\t\t ", time.time() - start_time
+
+    print "\t\t -> ", time_goel / time_plain, time_optimized / time_plain, 1
 
     # with open('pickles/opt.p', 'wb') as handle:
     #     pickle.dump(optimized, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
     # first = optimized.valid_sedge_paths
-    # second = lorenz.valid_sedge_paths
+    second = goel.valid_sedge_paths
     #
     # print cmp(optimized.valid_sedge_paths, lorenz.valid_sedge_paths)
     # print cmp(optimized.valid_sedge_costs, lorenz.valid_sedge_costs)
-    #
-    # dict_differences(first, second)
+
+
+    for attr in ["costs", "paths"]:
+        first = getattr(optimized, "valid_sedge_" + attr)
+        second = getattr(goel, "valid_sedge_" + attr)
+        dict_differences(attr, first, second, svpc.edge_latencies, (1 + epsilon) * limit, False)
 
 
     print "done"
 
+def dict_differences(attr, first, second, metric, bound, output=True):
+    errors_found = False
+    for key, edgesets in first.iteritems():
+        for key2, value2 in edgesets.iteritems():
 
+            if attr == "paths":
+                for key3, value3 in value2.iteritems():
+                    if output:
+                        print "  checking ", second[key][key2][key3], " == ", value3
+                    if second[key][key2][key3] != value3:
+                        # print "ERROR: opt[", key2, ", ", key3, "] = \n\t", value3, " != \n\t", second[key][key2][key3], " = lor[", key, "]"
+                        # errors_found = True
 
-def dict_differences(first, second, d=1):
-    for key, value in first.iteritems():
-        if not key in second.keys():
-            print key, " not in ", second
+                        second_costs = 0
+                        for e in second[key][key2][key3]:
+                            second_costs += metric[e]
 
-        if d <= 1:
-            dict_differences(value, second[key], d=d+1)
-        else:
-            if cmp(second[key], value) != 0:
-                print "ERROR: opt[", key, "] = \n\t", value, " != \n\t", second[key], " = lor[", key, "]"
+                        first_costs = 0
+                        for e in value3:
+                            first_costs += metric[e]
+
+                        if first_costs != second_costs:
+                            print "ERROR: opt[", key2, ", ", key3, "] = \n\t", first_costs, " != \n\t", second_costs, " = lor[", key, "]"
+                            errors_found = True
+
+            elif attr == "costs":
+                if output:
+                    print "  checking ", second[key][key2], " == ", value2
+                if second[key][key2] < value2 and not (np.isnan(second[key][key2]) and np.isnan(value2)):
+                    print "ERROR: opt[", key2, "] = \n\t", value2, " != \n\t", second[key][key2], " = lor[", key, "]"
+                    errors_found = True
+    print attr, "check done" + (", no errors!" if not errors_found else "\n  DIFFERENCES FOUND!!!")
+
 
 
 if __name__ == "__main__":
@@ -532,4 +608,5 @@ if __name__ == "__main__":
     # inpsect_pickles()
     # compare()
     # check_substrates()
-    check_optimization()
+    check_optimization_goel()
+    # check_optimization_lorenz()

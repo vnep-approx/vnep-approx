@@ -94,7 +94,7 @@ class ShortestValidPathsComputerLORENZ(object):
         distances[num_source_node][0] = 0
         self.predecessor[num_source_node] = num_source_node
 
-        for i in range(min_c_tilde, U_tilde+1):
+        for i in range(1, U_tilde+1):
             for snode in self.substrate.nodes:
                 n = self.snode_id_to_num_id[snode]
                 distances[n][i] = distances[n][i-1]

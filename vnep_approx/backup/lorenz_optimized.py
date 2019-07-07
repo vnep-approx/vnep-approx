@@ -3,7 +3,7 @@ from heapq import heappop, heappush
 import numpy as np
 import math
 
-class ShortestValidPathsComputerLORENZ_OPTIMIZED(object):
+class ShortestValidPathsComputerLORENZ(object):
 
     ''' This class is optimized used to check correctness of the optimized lorenz class;
         they should produce the same output
@@ -14,7 +14,6 @@ class ShortestValidPathsComputerLORENZ_OPTIMIZED(object):
         self.valid_mapping_restriction_computer = valid_mapping_restriction_computer
         self.edge_costs = edge_costs
         self.edge_latencies = edge_latencies
-        # self.edge_latencies = {sedge: max(lat, -lat) for sedge, lat in edge_latencies.iteritems()}
         self.epsilon = epsilon
         self.limit = limit
         self.edge_mapping_invalidities = False
@@ -42,9 +41,7 @@ class ShortestValidPathsComputerLORENZ_OPTIMIZED(object):
         self.edge_set_id_to_edge_set = self.valid_mapping_restriction_computer.get_edge_set_mapping()
         self.number_of_valid_edge_sets = self.valid_mapping_restriction_computer.get_number_of_different_edge_sets()
         self.valid_sedge_costs = {id: {} for id in range(self.number_of_valid_edge_sets)}
-        self.valid_sedge_latencies = {id: {} for id in range(self.number_of_valid_edge_sets)}
         self.valid_sedge_paths = {id: {} for id in range(self.number_of_valid_edge_sets)}
-
 
         self._prepare_numeric_graph()
         self._compute_all_pairs()
@@ -243,25 +240,20 @@ class ShortestValidPathsComputerLORENZ_OPTIMIZED(object):
 
             for num_source_node in range(self.number_of_nodes):
 
-                print "starting from ", num_source_node
-
-                start_time = time.time()
+                # print "starting from ", num_source_node
                 self._preprocess(num_source_node)
-                print " preprocessing eliminated ", self.number_of_nodes - self.num_feasible_nodes, " nodes in ", time.time() - start_time
 
                 converted_path_dict = {}
 
                 for num_target_node in range(self.number_of_nodes):
 
-                    if len(self.current_valid_edge_set) == 0\
-                            or num_target_node not in self.node_nums:
+                    if len(self.current_valid_edge_set) == 0 or self.node_infeasible[num_target_node]:
                         path, lat, costs = self.FAIL
                     else:
                         self.predecessor.fill(-1)
                         path, lat, costs = self._approx_latencies(num_source_node, num_target_node)
 
                     self.valid_sedge_costs[edge_set_index][(self.num_id_to_snode_id[num_source_node], self.num_id_to_snode_id[num_target_node])] = costs
-                    self.valid_sedge_latencies[edge_set_index][(self.num_id_to_snode_id[num_source_node], self.num_id_to_snode_id[num_target_node])] = lat
 
                     if costs == np.nan:
                         self.edge_mapping_invalidities = True
@@ -269,7 +261,8 @@ class ShortestValidPathsComputerLORENZ_OPTIMIZED(object):
                         self.latency_limit_overstepped = True
                         print "WARNING: Latency limit overstepped by {} from {} to {}".format(lat - self.limit, self.num_id_to_snode_id[num_source_node], self.num_id_to_snode_id[num_target_node])
 
-                    converted_path_dict[self.num_id_to_snode_id[num_target_node]] = path
+                    if path is not None:
+                        converted_path_dict[self.num_id_to_snode_id[num_target_node]] = path
 
                 self.valid_sedge_paths[edge_set_index][self.num_id_to_snode_id[num_source_node]] = converted_path_dict
 
@@ -282,8 +275,7 @@ class ShortestValidPathsComputerLORENZ_OPTIMIZED(object):
     def get_valid_sedge_costs_from_edgesetindex(self, edge_set_index, reqedge):
         return self.valid_sedge_costs[edge_set_index].get(reqedge, np.nan)
 
-    def get_valid_sedge_path(self, request_edge):
-        head, tail = request_edge
+    def get_valid_sedge_path(self, request_edge, source_mapping, target_mapping):
         request_edge_to_edge_set_id = self.valid_mapping_restriction_computer.get_reqedge_to_edgeset_id_mapping()
         edge_set_id_to_edge_set = request_edge_to_edge_set_id[request_edge]
-        return self.valid_sedge_paths[edge_set_id_to_edge_set][head].get(tail, None)
+        return self.valid_sedge_paths[edge_set_id_to_edge_set][source_mapping].get(target_mapping, None)
