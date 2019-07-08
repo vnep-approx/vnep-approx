@@ -496,7 +496,7 @@ def check_optimization_lorenz():
 
 def check_optimization_goel():
 
-    limit, epsilon = 0.01, 1
+    limit, epsilon = 10, 1
 
     with open('latency_study/pickles/before/vnet_1_mappings_0.p', 'rb') as handle:
         svpc = pickle.load(handle)
@@ -527,7 +527,7 @@ def check_optimization_goel():
 
     # ---------------------         170 s           ---------------
     start_time = time.time()
-    goel.compute()
+    # goel.compute()
     time_goel = time.time() - start_time
     print "time GOEL:\t\t ", time_goel
     #
@@ -549,11 +549,13 @@ def check_optimization_goel():
 
     print "\t\t -> ", time_goel / time_plain, time_optimized / time_plain, 1
 
+    return
+
     # with open('pickles/opt.p', 'wb') as handle:
     #     pickle.dump(optimized, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
     # first = optimized.valid_sedge_paths
-    second = goel.valid_sedge_paths
+    second = plain.valid_sedge_paths
     #
     # print cmp(optimized.valid_sedge_paths, lorenz.valid_sedge_paths)
     # print cmp(optimized.valid_sedge_costs, lorenz.valid_sedge_costs)
