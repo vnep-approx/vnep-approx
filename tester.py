@@ -7,12 +7,13 @@ from alib import datamodel
 from test.treewidth_model.test_data.substrate_test_data import create_test_substrate
 from test.treewidth_model.test_data.request_test_data import example_requests, create_test_request
 from vnep_approx.treewidth_model import ValidMappingRestrictionComputer
-from vnep_approx.treewidth_model import ShortestValidPathsComputer as SVPC_goel
+# from vnep_approx.treewidth_model import ShortestValidPathsComputer as SVPC_goel
 from vnep_approx.treewidth_model import ShortestValidPathsComputerWithoutLatencies as SVPC_given
 from vnep_approx.backup.lorenz import ShortestValidPathsComputerLORENZ as SVPC_Lorenz
 from vnep_approx.backup.lorenz_optimized import ShortestValidPathsComputerLORENZ as SVPC_LORENZ_OPT
 
 from vnep_approx.backup.goel_optimized import ShortestValidPathsComputer as SVPC_goel_OPT
+from vnep_approx.backup.goel import ShortestValidPathsComputer as SVPC_goel
 
 # from vnep_approx.deferred.extendedgraph import ExtendedGraph
 # from vnep_approx.deferred.extended_graph_visualizer import ExtendedGraphVisualizer
@@ -95,8 +96,11 @@ def create_large_request(num_nodes, sub, topology):
 def get_latency(lat_pars):
     return random.randint(lat_pars["min_value"], lat_pars["max_value"] + 1)
 
-def get_cost():
-    return float(random.randint(0, 10) + 1)
+def get_cost(cost_pars=None):
+    if cost_pars is None:
+        return float(random.randint(0, 10) + 1)
+    else:
+        return float(random.randint(cost_pars["min_value"],  cost_pars["max_value"] + 1))
 
 
 def run_test():
@@ -494,72 +498,79 @@ def check_optimization_lorenz():
 
 
 
-def check_optimization_goel():
+def check_optimization_goel(num_reps=15, substrate=None):
 
-    limit, epsilon = 10, 1
-
-    with open('latency_study/pickles/before/vnet_1_mappings_0.p', 'rb') as handle:
-        svpc = pickle.load(handle)
-
-    goel = SVPC_goel(svpc.substrate, svpc.valid_mapping_restriction_computer, svpc.edge_costs, svpc.edge_latencies, epsilon, limit)
-    optimized = SVPC_goel_OPT(svpc.substrate, svpc.valid_mapping_restriction_computer, svpc.edge_costs, svpc.edge_latencies, epsilon, limit)
-
-
-    plain = SVPC_given(svpc.substrate, None, svpc.valid_mapping_restriction_computer, svpc.edge_costs)
-
-    # given = SVPC_given (svpc.substrate, None, svpc.valid_mapping_restriction_computer, svpc.edge_costs)
-    # given.compute()
-
-
-    # goel.limit = 200
-    # optimized.limit = 200
-
-    print optimized.limit
-
-    # with open('pickles/lorenz.p', 'rb') as handle:
-    #     lorenz = pickle.load(handle)
+    # limit, epsilon = 20, 0.00001
     #
-    # with open('pickles/opt.p', 'rb') as handle:
-    #     optimized = pickle.load(handle)
+    # with open('latency_study/pickles/before/vnet_1_mappings_0.p', 'rb') as handle:
+    #     svpc = pickle.load(handle)
+    #
+    # goel =      SVPC_goel       (svpc.substrate, svpc.valid_mapping_restriction_computer, svpc.edge_costs, svpc.edge_latencies, epsilon, limit)
+    # optimized = SVPC_goel_OPT   (svpc.substrate, svpc.valid_mapping_restriction_computer, svpc.edge_costs, svpc.edge_latencies, epsilon, limit)
+    # plain =     SVPC_given      (svpc.substrate, None, svpc.valid_mapping_restriction_computer, svpc.edge_costs)
+
+
+    limit, epsilon = 10, 0.01
+    substrate = create_large_substrate(80, 0.88)
+    request = create_large_request(0, substrate, "dragon 3")
+
+    lat_pars = {"min_value": 50, "max_value": 400}
+    cost_pars = {"min_value": 50, "max_value": 400}
+    edge_costs = {e: get_cost(cost_pars) / 200 for e in substrate.edges}
+    edge_latencies = {e: get_latency(lat_pars) / 200 for e in substrate.edges}
+
+    vmrc = ValidMappingRestrictionComputer(substrate, request)
+    vmrc.compute()
+
+
+    goel =      SVPC_goel       (substrate, vmrc, edge_costs, edge_latencies, epsilon, limit)
+    optimized = SVPC_goel_OPT   (substrate, vmrc, edge_costs, edge_latencies, epsilon, limit)
+    plain =     SVPC_given      (substrate, None, vmrc, edge_costs)
 
 
     print "setup"
 
     # ---------------------         170 s           ---------------
-    start_time = time.time()
-    # goel.compute()
-    time_goel = time.time() - start_time
-    print "time GOEL:\t\t ", time_goel
-    #
-    #
-    # with open('pickles/lorenz.p', 'wb') as handle:
-    #     pickle.dump(lorenz, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
-    start_time = time.time()
-    optimized.compute()
-    time_optimized = time.time() - start_time
-    print "time OPTIMIZED:\t ", time_optimized
+    total_goel, total_opt = 0, 0
+    time_plain = 0
+
+    for i in range(num_reps):
+        print " - - - - - - - - - - - - - - - - -"
+        start_time = time.time()
+        goel.compute()
+        time_goel = time.time() - start_time
+        total_goel += time_goel
+        print "time GOEL:\t\t ", time_goel
+        #
+        #
+        # with open('pickles/lorenz.p', 'wb') as handle:
+        #     pickle.dump(lorenz, handle, protocol=pickle.HIGHEST_PROTOCOL)
+
+        start_time = time.time()
+        optimized.compute()
+        time_optimized = time.time() - start_time
+        total_opt += time_optimized
+        print "time OPTIMIZED:\t ", time_optimized
 
 
+        start_time = time.time()
+        plain.compute()
+        time_plain = time.time() - start_time
+        print "time PLAIN:\t\t ", time.time() - start_time
 
-    start_time = time.time()
-    plain.compute()
-    time_plain = time.time() - start_time
-    print "time PLAIN:\t\t ", time.time() - start_time
+    print "----------------------------------"
 
-    print "\t\t -> ", time_goel / time_plain, time_optimized / time_plain, 1
+    print " avg time GOEL:\t\t", total_goel / num_reps
+    print " avg time OPTIIZED:\t", total_opt / num_reps
+    print " limit overstepped" if optimized.latency_limit_overstepped else " limit held"
 
-    return
 
-    # with open('pickles/opt.p', 'wb') as handle:
-    #     pickle.dump(optimized, handle, protocol=pickle.HIGHEST_PROTOCOL)
+    print "\t\t ->\t", (total_goel / num_reps) / time_plain, "\n\t\t\t", (total_opt / num_reps) / time_plain,\
+        "\n\t\t\t", 1
 
-    # first = optimized.valid_sedge_paths
-    second = plain.valid_sedge_paths
-    #
-    # print cmp(optimized.valid_sedge_paths, lorenz.valid_sedge_paths)
-    # print cmp(optimized.valid_sedge_costs, lorenz.valid_sedge_costs)
 
+    # evaluate perforance
 
     for attr in ["costs", "paths"]:
         first = getattr(optimized, "valid_sedge_" + attr)
@@ -590,7 +601,7 @@ def dict_differences(attr, first, second, metric, bound, output=True):
                         for e in value3:
                             first_costs += metric[e]
 
-                        if first_costs != second_costs:
+                        if first_costs > bound:
                             print "ERROR: opt[", key2, ", ", key3, "] = \n\t", first_costs, " != \n\t", second_costs, " = lor[", key, "]"
                             errors_found = True
 
@@ -602,6 +613,13 @@ def dict_differences(attr, first, second, metric, bound, output=True):
                     errors_found = True
     print attr, "check done" + (", no errors!" if not errors_found else "\n  DIFFERENCES FOUND!!!")
 
+
+def check_result(svpc, req, sub):
+    for e in req.edges:
+        for start in sub.nodes:
+            for end in sub.nodes:
+                path = svpc.get_valid_sedge_path(e, start, end)
+                print path
 
 
 if __name__ == "__main__":

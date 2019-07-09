@@ -19,10 +19,9 @@ class ShortestValidPathsComputer(object):
 
     def compute(self):
         self.number_of_nodes = len(self.substrate.nodes)
+        self.predecessor = np.full(self.number_of_nodes, -1, dtype=np.int32)
         self.temp_latencies = np.full(self.number_of_nodes, -1, dtype=np.float64)
         self.node_infeasible = np.full(self.number_of_nodes, False, dtype=np.bool)
-        self.distances = np.full((self.number_of_nodes, 32 + 1), np.inf, dtype=np.float64)
-        self.preds = np.full((self.number_of_nodes, 32 + 1), -1, dtype=np.int32)
 
         self.edge_set_id_to_edge_set = self.valid_mapping_restriction_computer.get_edge_set_mapping()
         self.number_of_valid_edge_sets = self.valid_mapping_restriction_computer.get_number_of_different_edge_sets()
@@ -75,14 +74,10 @@ class ShortestValidPathsComputer(object):
     def _DAD(self, num_source_node, tau, tau_modified_latencies):
 
         # self.distances = np.full((self.number_of_nodes, tau + 1), np.inf, dtype=np.float64)
-        if tau + 1 > np.shape(self.distances)[1]:
-            self.distances = np.full((self.number_of_nodes, tau + 1), np.inf, dtype=np.float64)
-            self.preds = np.full((self.number_of_nodes, tau + 1), -1, dtype=np.int32)
-        else:
-            self.distances.fill(np.inf)
-            self.preds.fill(-1)
-
+        self.distances = np.full((self.number_of_nodes, tau + 1), np.inf, dtype=np.float64)
         self.distances[num_source_node][0] = 0
+
+        self.preds = np.full((self.number_of_nodes, tau + 1), -1, dtype=np.int32)
         self.preds[num_source_node][0] = num_source_node
 
         self._handle_zero_delay_links(num_source_node, tau_modified_latencies, 0)
@@ -97,8 +92,8 @@ class ShortestValidPathsComputer(object):
                 self.distances[num_current_node][t] = self.distances[num_current_node][t - 1]
                 self.preds[num_current_node][t] = self.preds[num_current_node][t - 1]
 
-                for sedge in self.substrate.in_edges[self.num_id_to_snode_id[num_current_node]]:
-                    if self.sedge_valid.get(sedge, False):
+                for sedge in self.current_valid_edge_set:
+                    if sedge in self.substrate.in_edges[self.num_id_to_snode_id[num_current_node]]:
                         latency = tau_modified_latencies[sedge]
                         if latency <= t:
                             num_in_neighbor = self.snode_id_to_num_id[sedge[0]]
@@ -229,7 +224,7 @@ class ShortestValidPathsComputer(object):
                     #     (source_snode, target_snode)] = \
                     # self.temp_latencies[num_target_node]
 
-                    if np.isnan(costs):
+                    if costs == np.nan:
                         self.edge_mapping_invalidities = True
                     elif self.temp_latencies[num_target_node] > self.limit:
                         self.latency_limit_overstepped = True
