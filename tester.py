@@ -18,6 +18,8 @@ from vnep_approx.backup.goel import ShortestValidPathsComputer as SVPC_goel
 # from vnep_approx.deferred.extendedgraph import ExtendedGraph
 # from vnep_approx.deferred.extended_graph_visualizer import ExtendedGraphVisualizer
 
+from vnep_approx.test_results import verify_correct_result
+
 
 class LatencyParameters:
     pass
@@ -55,18 +57,26 @@ class GraphCreatorAarnet:
 
 
 def create_large_substrate(num_nodes, edge_res_factor):
-    if num_nodes > 26:
-        num_nodes = 26
+    # if num_nodes > 26:
+    #     num_nodes = 26
 
     import string
 
+    names = []
+    i = 1
+    while num_nodes > 26:
+        names.extend([ i * c for c in string.ascii_lowercase ])
+        num_nodes -= 26
+        i += 1
+    names.extend([ i * c for c in string.ascii_lowercase[:num_nodes] ])
+
     sub = datamodel.Substrate("test_sub_"+str(num_nodes)+"_nodes")
 
-    for letter in string.ascii_lowercase[:num_nodes]:
+    for letter in names:
         sub.add_node(letter, types=["t1"], capacity={"t1": 100}, cost={"t1": 1.0})
 
-    for i, start in enumerate(string.ascii_lowercase[:num_nodes]):
-        for end in string.ascii_lowercase[i+1:num_nodes]:
+    for i, start in enumerate(names):
+        for end in names[i+1:]:
             if random.random() <= edge_res_factor:
                 sub.add_edge(start, end, capacity=100.0, cost=1.0, bidirected=random.random() <= 0.25)
     return sub
@@ -498,7 +508,7 @@ def check_optimization_lorenz():
 
 
 
-def check_optimization_goel(num_reps=15, substrate=None):
+def check_optimization_goel(num_reps=10, substrate=None):
 
     # limit, epsilon = 20, 0.00001
     #
@@ -511,7 +521,7 @@ def check_optimization_goel(num_reps=15, substrate=None):
 
 
     limit, epsilon = 10, 0.01
-    substrate = create_large_substrate(80, 0.88)
+    substrate = create_large_substrate(30, 1)
     request = create_large_request(0, substrate, "dragon 3")
 
     lat_pars = {"min_value": 50, "max_value": 400}
@@ -528,7 +538,8 @@ def check_optimization_goel(num_reps=15, substrate=None):
     plain =     SVPC_given      (substrate, None, vmrc, edge_costs)
 
 
-    print "setup"
+    print "setup substrate on ", substrate.get_number_of_nodes()\
+                                 , " nodes and ", substrate.get_number_of_edges(), " edges"
 
     # ---------------------         170 s           ---------------
 
@@ -569,13 +580,16 @@ def check_optimization_goel(num_reps=15, substrate=None):
     print "\t\t ->\t", (total_goel / num_reps) / time_plain, "\n\t\t\t", (total_opt / num_reps) / time_plain,\
         "\n\t\t\t", 1
 
+    verify_correct_result(goel)
+    verify_correct_result(optimized)
+
 
     # evaluate perforance
 
-    for attr in ["costs", "paths"]:
-        first = getattr(optimized, "valid_sedge_" + attr)
-        second = getattr(goel, "valid_sedge_" + attr)
-        dict_differences(attr, first, second, svpc.edge_latencies, (1 + epsilon) * limit, False)
+    # for attr in ["costs", "paths"]:
+    #     first = getattr(optimized, "valid_sedge_" + attr)
+    #     second = getattr(goel, "valid_sedge_" + attr)
+    #     dict_differences(attr, first, second, edge_latencies, (1 + epsilon) * limit, False)
 
 
     print "done"
@@ -589,7 +603,8 @@ def dict_differences(attr, first, second, metric, bound, output=True):
                 for key3, value3 in value2.iteritems():
                     if output:
                         print "  checking ", second[key][key2][key3], " == ", value3
-                    if second[key][key2][key3] != value3:
+                    # if second[key][key2][key3] != value3:
+                    if second.get_valid_sedge_path(key, key2, key3) != value3:
                         # print "ERROR: opt[", key2, ", ", key3, "] = \n\t", value3, " != \n\t", second[key][key2][key3], " = lor[", key, "]"
                         # errors_found = True
 

@@ -15,7 +15,6 @@ class ShortestValidPathsComputer(object):
         self.limit = limit
         self.edge_mapping_invalidities = False
         self.latency_limit_overstepped = False
-        self.FAIL = (None, np.nan, np.nan)
 
     def compute(self):
         self.number_of_nodes = len(self.substrate.nodes)
@@ -67,8 +66,9 @@ class ShortestValidPathsComputer(object):
                         and tau_modified_latencies[sedge] == 0:
                     num_endpoint = self.snode_id_to_num_id[sedge[1]]
                     if not self.node_infeasible[num_endpoint]:
-                        if self.distances[num_endpoint][t] > self.distances[num_source_node][t]:
-                            self.distances[num_endpoint][t] = self.distances[num_source_node][t]
+                        val = self.distances[num_current_node][t] + self.edge_costs[sedge]
+                        if self.distances[num_endpoint][t] > val:
+                            self.distances[num_endpoint][t] = val
                             self.preds[num_endpoint][t] = num_current_node
                             queue.append(num_endpoint)
 
@@ -148,10 +148,12 @@ class ShortestValidPathsComputer(object):
 
         approx_holds = False
 
-        closed_nodes = self.node_infeasible[:]
+        closed_nodes = np.copy(self.node_infeasible)
         closed_nodes[num_source_node] = True
 
         while not approx_holds:
+
+            # print " ------------------------ tau:   ", tau, "\t -------------------------"
 
             tau_modified_latencies = {}
             for key, value in self.edge_latencies.items():
@@ -164,7 +166,7 @@ class ShortestValidPathsComputer(object):
 
             for num_target_node in self.node_nums:
 
-                if not closed_nodes[num_target_node]:
+                if closed_nodes[num_target_node]:
                     continue
 
                 if self.preds[num_target_node][tau] == -1:
@@ -231,6 +233,7 @@ class ShortestValidPathsComputer(object):
 
                     if np.isnan(costs):
                         self.edge_mapping_invalidities = True
+                        print "shouldnt happen"
                     elif self.temp_latencies[num_target_node] > self.limit:
                         self.latency_limit_overstepped = True
 
