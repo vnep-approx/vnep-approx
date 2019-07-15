@@ -60,9 +60,9 @@ class ShortestValidPathsComputer(object):
             num_current_node = queue.pop()
 
             for sedge in self.substrate.out_edges[self.num_id_to_snode_id[num_current_node]]:
-                # if sedge in self.current_valid_edge_set \
-                if self.sedge_valid.get(sedge, False) \
+                if sedge in self.current_valid_edge_set \
                         and tau_modified_latencies[sedge] == 0:
+                # if self.sedge_valid.get(sedge, False) \
                     num_endpoint = self.snode_id_to_num_id[sedge[1]]
                     if not self.node_infeasible[num_endpoint]:
                         val = self.distances[num_current_node][t] + self.edge_costs[sedge]
@@ -73,7 +73,6 @@ class ShortestValidPathsComputer(object):
 
     def _DAD(self, num_source_node, tau, tau_modified_latencies):
 
-        # self.distances = np.full((self.number_of_nodes, tau + 1), np.inf, dtype=np.float64)
         self.distances = np.full((self.number_of_nodes, tau + 1), np.inf, dtype=np.float64)
         self.distances[num_source_node][0] = 0
 
@@ -137,7 +136,7 @@ class ShortestValidPathsComputer(object):
 
         self._preprocess(num_source_node)
 
-        tau = 2  # int(self.limit) / 100 + 1 # max(int(math.log(self.limit) / 2), 1)
+        tau = 3  # int(self.limit) / 100 + 1 # max(int(math.log(self.limit) / 2), 1)
 
         self.paths = {self.snode_id_to_num_id[snode]: None for snode in self.substrate.nodes}
 

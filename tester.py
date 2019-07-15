@@ -78,7 +78,7 @@ def create_large_substrate(num_nodes, edge_res_factor):
     for i, start in enumerate(names):
         for end in names[i+1:]:
             if random.random() <= edge_res_factor:
-                sub.add_edge(start, end, capacity=100.0, cost=1.0, bidirected=random.random() <= 0.25)
+                sub.add_edge(start, end, capacity=100.0, cost=1.0, bidirected=False)
     return sub
 
 
@@ -508,7 +508,7 @@ def check_optimization_lorenz():
 
 
 
-def check_optimization_goel(num_reps=10, substrate=None):
+def check_optimization_goel(num_reps=15, substrate=None):
 
     # limit, epsilon = 20, 0.00001
     #
@@ -520,8 +520,8 @@ def check_optimization_goel(num_reps=10, substrate=None):
     # plain =     SVPC_given      (svpc.substrate, None, svpc.valid_mapping_restriction_computer, svpc.edge_costs)
 
 
-    limit, epsilon = 10, 0.01
-    substrate = create_large_substrate(30, 1)
+    limit, epsilon = 15, 0.00001
+    substrate = create_large_substrate(40, 1)
     request = create_large_request(0, substrate, "dragon 3")
 
     lat_pars = {"min_value": 50, "max_value": 400}
@@ -577,19 +577,14 @@ def check_optimization_goel(num_reps=10, substrate=None):
     print " limit overstepped" if optimized.latency_limit_overstepped else " limit held"
 
 
-    print "\t\t ->\t", (total_goel / num_reps) / time_plain, "\n\t\t\t", (total_opt / num_reps) / time_plain,\
-        "\n\t\t\t", 1
+    if time_plain > 0:
+        print "\t\t ->\t", (total_goel / num_reps) / time_plain, "\n\t\t\t", (total_opt / num_reps) / time_plain,\
+            "\n\t\t\t", 1
 
-    verify_correct_result(goel)
-    verify_correct_result(optimized)
-
-
-    # evaluate perforance
-
-    # for attr in ["costs", "paths"]:
-    #     first = getattr(optimized, "valid_sedge_" + attr)
-    #     second = getattr(goel, "valid_sedge_" + attr)
-    #     dict_differences(attr, first, second, edge_latencies, (1 + epsilon) * limit, False)
+    if total_goel > 0:
+        verify_correct_result(goel)
+    if total_opt > 0:
+        verify_correct_result(optimized)
 
 
     print "done"
