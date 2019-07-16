@@ -65,6 +65,19 @@ class RandRoundSepLPOptDynVMPCollectionResultForCostVariant(twm.RandRoundSepLPOp
         #lastly: adapt the collection's scenario
         self.scenario = original_scenario
 
+    def _get_solution_overview(self):
+        if not self.overall_feasible:
+            result = "\nNo feasible solution found\n"
+        else:
+            result = "\n\t{:^10s} | {:^40s} {:^20s} | {:^8s}\n".format("COST", "LP Recomputation Mode", "Rounding Order", "INDEX")
+            for identifier in self.solutions.keys():
+                for solution_index, solution in enumerate(self.solutions[identifier]):
+                    result += "\t" + "{:^10.5f} | {:^40s} {:^20s} | {:<8d}\n".format(solution.cost,
+                                                                                     identifier[0].value,
+                                                                                     identifier[1].value,
+                                                                                     solution_index)
+        return result
+
 
 class RandRoundSepLPOptDynVMPCollectionForFogModel(twm.RandRoundSepLPOptDynVMPCollection):
 

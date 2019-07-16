@@ -1940,8 +1940,6 @@ class RandRoundSepLPOptDynVMPCollectionResult(modelcreator.AlgorithmResult):
         rr_solution.solution.scenario = original_scenario
         return rr_solution
 
-
-
     def _get_solution_overview(self):
         result = "\n\t{:^10s} | {:^40s} {:^20s} | {:^8s}\n".format("PROFIT", "LP Recomputation Mode", "Rounding Order", "INDEX")
         for identifier in self.solutions.keys():
@@ -2430,13 +2428,22 @@ class RandRoundSepLPOptDynVMPCollection(object):
         self.perform_rounding()
         #self.logger.info("Best solution by rounding is {}".format(best_solution))
 
+        # might happen that the given roundings do not find a solution with the given computation modes
+        found_any_solution = False
+        for identifier in self.result.solutions.keys():
+            if len(self.result.solutions[identifier]) > 0:
+                found_any_solution = True
+        if not found_any_solution:
+            self.logger.warn("No solution found by any given randomized rounding setting ... manually setting result "
+                             "scenario infeasibility!")
+            self.result.overall_feasible = False
         return self.result
 
 
 
 
     def remove_impossible_mappings_and_reoptimize(self, currently_fixed_allocations, fixed_requests, lp_computation_mode):
-        #self.logger.debug("Removing mappings that would violate capacities given the current state..")
+        self.logger.debug("Removing mappings that would violate capacities given the current state..")
         for req in self.requests:
             if req in fixed_requests:
                 continue
@@ -2495,6 +2502,9 @@ class RandRoundSepLPOptDynVMPCollection(object):
         for lp_computation_mode in actual_lp_computation_modes:
             for rounding_order in self.rounding_order_list:
                 result_list = self.round_solution_without_violations(lp_computation_mode, rounding_order)
+                if len(result_list) == 0:
+                    self.logger.info("LP computation mode {} with rounding order {} did not find constraint "
+                                     "non-violating solution".format(lp_computation_mode, rounding_order))
                 for solution in result_list:
                     self.result.add_solution(rounding_order, lp_computation_mode, solution=solution)
         self.logger.debug(self.result._get_solution_overview())
@@ -2525,7 +2535,7 @@ class RandRoundSepLPOptDynVMPCollection(object):
 
             add_solution_to_results = True
             if len(solution.request_mapping) == 0:
-                self.logger.warn("Scenario solution does not contain mapping any requests!")
+                self.logger.debug("Scenario solution does not contain mapping any requests!")
                 add_solution_to_results = False
             if not solution.validate_solution():
                 self.logger.info("ERROR: scenario solution did not validate!")
