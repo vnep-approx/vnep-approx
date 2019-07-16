@@ -1868,11 +1868,10 @@ class LPRecomputationMode(enum.Enum):
 
 RandomizedRoundingSolution = namedtuple("RandomizedRoundingSolution", ["solution",
                                                                        "profit",
+                                                                       "cost",
                                                                        "max_node_load",
                                                                        "max_edge_load",
                                                                        "time_to_round_solution"])
-
-
 
 
 class RandRoundSepLPOptDynVMPCollectionResult(modelcreator.AlgorithmResult):
@@ -1881,9 +1880,6 @@ class RandRoundSepLPOptDynVMPCollectionResult(modelcreator.AlgorithmResult):
         self.scenario = scenario
         self.lp_computation_information = lp_computation_information
         self.solutions = {}
-        # a properly defined profit maximization is always feasible
-        # NOTE: This is not used currently anywhere for meaningful reason.
-        # A None object is returned in case the scenario is not feasible, which is handled by the execution framework.
         self.overall_feasible = overall_feasible
 
     def add_solution(self, rounding_order, lp_recomputation_mode, solution):
@@ -1915,6 +1911,7 @@ class RandRoundSepLPOptDynVMPCollectionResult(modelcreator.AlgorithmResult):
                 else:
                     new_list_of_solutions.append(RandomizedRoundingSolution(solution=None,
                                                                             profit=solution.profit,
+                                                                            cost=solution.cost,
                                                                             max_node_load=solution.max_node_load,
                                                                             max_edge_load=solution.max_edge_load,
                                                                             time_to_round_solution=solution.time_to_round_solution))
@@ -1974,7 +1971,9 @@ class RandRoundSepLPOptDynVMPCollection(object):
                  number_initial_mappings_to_compute,
                  number_further_mappings_to_add,
                  gurobi_settings=None,
-                 logger=None):
+                 logger=None,
+                 calculate_cost_of_integral_solutions=False,
+                 skip_zero_profit_reqs_at_rounding_iteration=True):
         self.scenario = scenario
         self.substrate = self.scenario.substrate
         self.requests = self.scenario.requests
@@ -2025,6 +2024,8 @@ class RandRoundSepLPOptDynVMPCollection(object):
             self.logger = util.get_logger(__name__, make_file=False, propagate=True)
         else:
             self.logger = logger
+        self.calculate_cost_of_integral_solutions = calculate_cost_of_integral_solutions
+        self.skip_zero_profit_reqs_at_rounding_iteration = skip_zero_profit_reqs_at_rounding_iteration
 
     def check_supported_objective(self):
         '''Raised ValueError if a not supported objective is found in the input scenario
@@ -2338,11 +2339,9 @@ class RandRoundSepLPOptDynVMPCollection(object):
         if not overall_feasible:
             self.logger.exception("No feasible mapping found for profit maximization! "
                                   "This should not happen with proper scenario generation!")
-            self.result = None
-        else:
-            self.result = RandRoundSepLPOptDynVMPCollectionResult(scenario=scenario,
-                                                                  lp_computation_information=sep_lp_solution,
-                                                                  overall_feasible=overall_feasible)
+        self.result = RandRoundSepLPOptDynVMPCollectionResult(scenario=scenario,
+                                                              lp_computation_information=sep_lp_solution,
+                                                              overall_feasible=overall_feasible)
 
     def compute_solution(self):
         ''' Abstract function computing an integral solution to the model (generated before).
@@ -2514,7 +2513,8 @@ class RandRoundSepLPOptDynVMPCollection(object):
 
             time_rr0 = time.time()
 
-            solution, profit, max_node_load, max_edge_load = self.rounding_iteration_violations_without_violations(A, lp_computation_mode, rounding_order)
+            solution, profit, cost, max_node_load, max_edge_load = \
+                self.rounding_iteration_violations_without_violations(A, lp_computation_mode, rounding_order)
 
             if lp_computation_mode != LPRecomputationMode.NONE:
                 self.model.reset()
@@ -2523,18 +2523,24 @@ class RandRoundSepLPOptDynVMPCollection(object):
 
             time_rr = time.time() - time_rr0
 
+            add_solution_to_results = True
+            if len(solution.request_mapping) == 0:
+                self.logger.warn("Scenario solution does not contain mapping any requests!")
+                add_solution_to_results = False
             if not solution.validate_solution():
                 self.logger.info("ERROR: scenario solution did not validate!")
             if not solution.validate_solution_fulfills_capacity():
                 self.logger.info("ERROR: scenario solution did not satisfy capacity constraints!")
 
-            solution_tuple = RandomizedRoundingSolution(solution=solution,
-                                                        profit=profit,
-                                                        max_node_load=max_node_load,
-                                                        max_edge_load=max_edge_load,
-                                                        time_to_round_solution=time_rr)
+            if add_solution_to_results:
+                solution_tuple = RandomizedRoundingSolution(solution=solution,
+                                                            profit=profit,
+                                                            cost=cost,
+                                                            max_node_load=max_node_load,
+                                                            max_edge_load=max_edge_load,
+                                                            time_to_round_solution=time_rr)
 
-            result_list.append(solution_tuple)
+                result_list.append(solution_tuple)
 
         return result_list
 
@@ -2581,7 +2587,7 @@ class RandRoundSepLPOptDynVMPCollection(object):
             chosen_mapping = None
 
             for mapping_index, mapping in enumerate(self.mappings_of_requests[req]):
-                if req.profit < 0.0001:
+                if req.profit < 0.0001 and self.skip_zero_profit_reqs_at_rounding_iteration:
                     continue
                 total_flow += self.mapping_variables[req][mapping_index].X
                 if p < total_flow:
@@ -2620,7 +2626,8 @@ class RandRoundSepLPOptDynVMPCollection(object):
             self.adapted_variables = []
 
         max_node_load, max_edge_load = self.calc_max_loads(A)
-        return scenario_solution, B, max_node_load, max_edge_load
+        cost = self.calc_cost_of_integral_solution(scenario_solution, A)
+        return scenario_solution, B, cost, max_node_load, max_edge_load
 
 
     def calc_max_loads(self, L):
@@ -2635,6 +2642,30 @@ class RandRoundSepLPOptDynVMPCollection(object):
             if ratio > max_edge_load:
                 max_edge_load = ratio
         return (max_node_load, max_edge_load)
+
+    def calc_cost_of_integral_solution(self, scenario_solution, allocations):
+        """
+        Calculate the total cost of an integral solution.
+
+        :param scenario_solution:
+        :param allocations:
+        :return:
+        """
+        if self.calculate_cost_of_integral_solutions:
+            substrate = scenario_solution.scenario.substrate
+            total_cost = 0.0
+            for sres, alloc in allocations.iteritems():
+                if sres[0] in substrate.types:
+                    ntype, node_id = sres
+                    res_cost = substrate.node[node_id]['cost'][ntype]
+                elif sres in substrate.edges:
+                    res_cost = substrate.edge[sres]['cost']
+                else:
+                    raise ValueError("Unexpected allocations format!")
+                total_cost += res_cost * alloc
+            return total_cost
+        else:
+            return None
 
     def check_whether_mapping_would_obey_resource_violations(self, L, mapping_loads):
         result = True

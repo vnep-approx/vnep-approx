@@ -36,22 +36,34 @@ class RandRoundSepLPOptDynVMPCollectionResultForCostVariant(twm.RandRoundSepLPOp
 
     def __init__(self, scenario, lp_computation_information, overall_feasible):
         super(RandRoundSepLPOptDynVMPCollectionResultForCostVariant, self).__init__(scenario, lp_computation_information, overall_feasible)
-        # NOTE: The overall_feasible is not used currently anywhere for meaningful reason.
-        # A None object is returned in case the scenario is not feasible, which is handled by the execution framework.
 
     def get_solution(self):
-        # TODO: we might not need overall_feasible parameter, as we return None at the self(algorithm instance).result... But we might
-        # need it for explicit calculation of feasibility ratio
-        if self.overall_feasible:
-            return super(RandRoundSepLPOptDynVMPCollectionResultForCostVariant, self).get_solution()
-        else:
-            raise ValueError("Solutions cannot be retrieved from an infeasible cost variant result")
+        if not self.overall_feasible:
+            # the solutions dictionary is going to be empty
+            pass
+        return super(RandRoundSepLPOptDynVMPCollectionResultForCostVariant, self).get_solution()
 
     def _cleanup_references_raw(self, original_scenario):
-        if self.overall_feasible:
-            super(RandRoundSepLPOptDynVMPCollectionResultForCostVariant, self)._cleanup_references_raw(original_scenario)
-        else:
-            raise ValueError("References cannot be cleaned up for infeasible cost variant result")
+        for identifier in self.solutions.keys():
+            #search for best solution and remove mapping information of all other solutions
+            list_of_solutions = self.solutions[identifier]
+            best_solution = min(list_of_solutions, key= lambda x: x.cost)
+            new_list_of_solutions = []
+
+            for solution in list_of_solutions:
+                if solution == best_solution:
+                    new_list_of_solutions.append(self._actual_cleanup_of_references_raw(original_scenario, solution))
+                else:
+                    new_list_of_solutions.append(twm.RandomizedRoundingSolution(solution=None,
+                                                                            profit=solution.profit,
+                                                                            cost=solution.cost,
+                                                                            max_node_load=solution.max_node_load,
+                                                                            max_edge_load=solution.max_edge_load,
+                                                                            time_to_round_solution=solution.time_to_round_solution))
+
+            self.solutions[identifier] = new_list_of_solutions
+        #lastly: adapt the collection's scenario
+        self.scenario = original_scenario
 
 
 class RandRoundSepLPOptDynVMPCollectionForFogModel(twm.RandRoundSepLPOptDynVMPCollection):
@@ -76,7 +88,12 @@ class RandRoundSepLPOptDynVMPCollectionForFogModel(twm.RandRoundSepLPOptDynVMPCo
                                                                              number_initial_mappings_to_compute,
                                                                              number_further_mappings_to_add,
                                                                              gurobi_settings,
-                                                                             logger)
+                                                                             logger,
+                                                                           skip_zero_profit_reqs_at_rounding_iteration=False,
+                                                                           calculate_cost_of_integral_solutions=True)
+
+        if len(self.rounding_order_list) != 1 or twm.RoundingOrder.RANDOM not in self.rounding_order_list:
+            raise ValueError("Cost variant only supports RANDOM randomized rounding order!")
         # create a profit variant from the base class
         scenario_with_unit_profit = copy.deepcopy(scenario)
         scenario_with_unit_profit.objective = datamodel.Objective.MAX_PROFIT
@@ -92,6 +109,7 @@ class RandRoundSepLPOptDynVMPCollectionForFogModel(twm.RandRoundSepLPOptDynVMPCo
                                                                              gurobi_settings,
                                                                              logger.getChild("ProfitVariantForInitialization"))
         self.profit_variant_algorithm_instance.init_model_creator()
+        # prevent rounding operation to discard requests without profit (and maintian compatibility with the original rounding scheme).
 
     def check_supported_objective(self):
         '''Raised ValueError if a not supported objective is found in the input scenario
@@ -217,13 +235,16 @@ class RandRoundSepLPOptDynVMPCollectionForFogModel(twm.RandRoundSepLPOptDynVMPCo
         :param overall_feasible:
         :return:
         """
-        if not overall_feasible:
-            self.result = None
-        else:
-            # TODO: save additional info for the Cost variant (e.g. objective value, others to plot.)
-            self.result = RandRoundSepLPOptDynVMPCollectionResultForCostVariant(scenario, sep_lp_solution, overall_feasible)
+        self.result = RandRoundSepLPOptDynVMPCollectionResultForCostVariant(scenario, sep_lp_solution, overall_feasible)
 
     def perform_separation_and_introduce_new_columns(self, current_objective, ignore_requests=[]):
+        """
+        Overridden function to slightly modify the constraint separation procedure.
+
+        :param current_objective:
+        :param ignore_requests:
+        :return:
+        """
         new_columns_generated = False
         total_dual_violations = 0
         for req in self.requests:
@@ -254,7 +275,7 @@ class RandRoundSepLPOptDynVMPCollectionForFogModel(twm.RandRoundSepLPOptDynVMPCo
             self._current_solution_quality = total_dual_violations
 
         self.logger.info("\nCurrent LP solution value is {:10.5f}\n"
-                           "Current dual upper bound is  {:10.5f}\n"
+                           "Current dual lower bound is  {:10.5f}\n"
                          "Accordingly, current solution is at least {}-optimal".format(current_objective, current_objective+total_dual_violations, 1+self._current_solution_quality))
 
         if self._current_solution_quality < self.lp_relative_quality:
