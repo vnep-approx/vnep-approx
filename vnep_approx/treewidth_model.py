@@ -2428,6 +2428,9 @@ class RandRoundSepLPOptDynVMPCollection(object):
         self.perform_rounding()
         #self.logger.info("Best solution by rounding is {}".format(best_solution))
 
+        # after the randomized rounding is finished
+        self.result.lp_computation_information.time_postprocessing = time.time() - self._time_postprocess_start
+
         # might happen that the given roundings do not find a solution with the given computation modes
         found_any_solution = False
         for identifier in self.result.solutions.keys():
