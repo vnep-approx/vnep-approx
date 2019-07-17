@@ -47,21 +47,22 @@ class RandRoundSepLPOptDynVMPCollectionResultForCostVariant(twm.RandRoundSepLPOp
         for identifier in self.solutions.keys():
             #search for best solution and remove mapping information of all other solutions
             list_of_solutions = self.solutions[identifier]
-            best_solution = min(list_of_solutions, key= lambda x: x.cost)
-            new_list_of_solutions = []
+            if len(list_of_solutions) > 0:
+                best_solution = min(list_of_solutions, key= lambda x: x.cost)
+                new_list_of_solutions = []
 
-            for solution in list_of_solutions:
-                if solution == best_solution:
-                    new_list_of_solutions.append(self._actual_cleanup_of_references_raw(original_scenario, solution))
-                else:
-                    new_list_of_solutions.append(twm.RandomizedRoundingSolution(solution=None,
-                                                                            profit=solution.profit,
-                                                                            cost=solution.cost,
-                                                                            max_node_load=solution.max_node_load,
-                                                                            max_edge_load=solution.max_edge_load,
-                                                                            time_to_round_solution=solution.time_to_round_solution))
+                for solution in list_of_solutions:
+                    if solution == best_solution:
+                        new_list_of_solutions.append(self._actual_cleanup_of_references_raw(original_scenario, solution))
+                    else:
+                        new_list_of_solutions.append(twm.RandomizedRoundingSolution(solution=None,
+                                                                                profit=solution.profit,
+                                                                                cost=solution.cost,
+                                                                                max_node_load=solution.max_node_load,
+                                                                                max_edge_load=solution.max_edge_load,
+                                                                                time_to_round_solution=solution.time_to_round_solution))
 
-            self.solutions[identifier] = new_list_of_solutions
+                self.solutions[identifier] = new_list_of_solutions
         #lastly: adapt the collection's scenario
         self.scenario = original_scenario
 
@@ -355,3 +356,28 @@ class RandRoundSepLPOptDynVMPCollectionForFogModel(twm.RandRoundSepLPOptDynVMPCo
         self.allocations_of_mappings[req].extend(current_new_allocations[:len(current_new_variables)])
         self.mapping_variables[req].extend(current_new_variables)
         self.logger.debug("Introduced {} new mappings for {}".format(len(current_new_variables), req.name))
+
+    def validate_randomized_rounding_solutions(self):
+        """
+        Checks if all requests are mapped after the randomized rounding as required by the constraints.
+        If not, then set the solution infeasible. (example occurance: the chosen mapping for the single request does not meet the capacity
+        constraints and new mapping is not chosen for it. So the solution would have 0 cost and seem feasible, but does not meet the
+        constraint of mapping all requests.)
+
+        :return:
+        """
+        # remove integral solution which does not have all requests mapped, and set the result infeasible if there are no
+        # integral solutions left
+        for identifier in self.result.solutions.keys():
+            list_of_valid_solutions = []
+            for rr_solution in self.result.solutions[identifier]:
+                if len(rr_solution.solution.request_mapping) == len(self.requests):
+                    list_of_valid_solutions.append(rr_solution)
+            self.result.solutions[identifier] = list_of_valid_solutions
+        is_result_still_feasible = False
+        for identifier, list_of_valid_solutions in self.result.solutions.iteritems():
+            if len(list_of_valid_solutions) > 0:
+                is_result_still_feasible = True
+        if not is_result_still_feasible:
+            self.logger.info("Setting result infeasible, because none of the integral solutions after the randomized rounding maps all requests.")
+        self.result.overall_feasible = is_result_still_feasible

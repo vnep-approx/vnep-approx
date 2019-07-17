@@ -2447,6 +2447,7 @@ class RandRoundSepLPOptDynVMPCollection(object):
 
     def remove_impossible_mappings_and_reoptimize(self, currently_fixed_allocations, fixed_requests, lp_computation_mode):
         self.logger.debug("Removing mappings that would violate capacities given the current state..")
+        newly_adapted_variable_count = 0
         for req in self.requests:
             if req in fixed_requests:
                 continue
@@ -2454,14 +2455,19 @@ class RandRoundSepLPOptDynVMPCollection(object):
                 if not self.check_whether_mapping_would_obey_resource_violations(currently_fixed_allocations, self.allocations_of_mappings[req][mapping_index]):
                     self.mapping_variables[req][mapping_index].ub = 0.0
                     self.adapted_variables.append(self.mapping_variables[req][mapping_index])
+                    newly_adapted_variable_count += 1
 
-
-        #self.logger.debug("Re-compute LP after removal of impossible columns")
-
+        self.logger.debug("Re-compute LP after removal of impossible columns, number of adapted variables {}".
+                          format(newly_adapted_variable_count))
         self.model.update()
         self.model.optimize()
-        current_obj = self.model.getAttr("ObjVal")
-
+        if self.model.getAttr("SolCount") > 0:
+            current_obj = self.model.getAttr("ObjVal")
+        else:
+            self.logger.debug("Model became infeasible after removing impossible mappings")
+            # this recomputation mode with removing the violated constraints didn't lead to a solution
+            # we have to rely on other recomputation mode, rounding order combinations.
+            return
         if lp_computation_mode == LPRecomputationMode.RECOMPUTATION_WITH_SINGLE_SEPARATION:
             new_columns_generated = True
             while new_columns_generated:
@@ -2469,7 +2475,7 @@ class RandRoundSepLPOptDynVMPCollection(object):
                 new_columns_generated = self.perform_separation_and_introduce_new_columns(current_objective=current_obj,
                                                                                           ignore_requests=fixed_requests)
                 if new_columns_generated:
-                    #self.logger.debug("Separation yielded new mappings. Reoptimizing!")
+                    self.logger.debug("Separation yielded new mappings. Reoptimizing!")
                     self.model.update()
                     self.model.optimize()
                     current_obj = self.model.getAttr("ObjVal")
@@ -2484,13 +2490,14 @@ class RandRoundSepLPOptDynVMPCollection(object):
                         self.mapping_variables[req][mapping_index].ub = 0.0
                         self.adapted_variables.append(self.mapping_variables[req][mapping_index])
 
-
             #self.logger.debug("Re-compute after removal of stupid mappings...")
 
             self.model.update()
             self.model.optimize()
 
-
+    def validate_randomized_rounding_solutions(self):
+        # in case of the profit variant there is nothing to do, all solutions should be ok.
+        pass
 
     def perform_rounding(self):
 
@@ -2510,6 +2517,7 @@ class RandRoundSepLPOptDynVMPCollection(object):
                                      "non-violating solution".format(lp_computation_mode, rounding_order))
                 for solution in result_list:
                     self.result.add_solution(rounding_order, lp_computation_mode, solution=solution)
+        self.validate_randomized_rounding_solutions()
         self.logger.debug(self.result._get_solution_overview())
 
     def round_solution_without_violations(self, lp_computation_mode, rounding_order):
@@ -2608,8 +2616,8 @@ class RandRoundSepLPOptDynVMPCollection(object):
                     break
 
             if chosen_mapping is not None:
-
                 if self.check_whether_mapping_would_obey_resource_violations(A, self.allocations_of_mappings[req][chosen_mapping[0]]):
+                    self.logger.debug("Choosing constraint obeying mapping {} for request {}".format(chosen_mapping, req))
                     B += req.profit
                     for res in self.substrate_resources:
                         if res in self.allocations_of_mappings[req][chosen_mapping[0]].keys():
@@ -2620,7 +2628,15 @@ class RandRoundSepLPOptDynVMPCollection(object):
                         self.adapted_variables.append(self.mapping_variables[req][chosen_mapping[0]])
 
                     scenario_solution.add_mapping(req, chosen_mapping[1])
+                else:
+                    # NOTE: in case of the cost variant, this is a problem, because this integral solution won't meet the
+                    # constraint of mapping all requests! New reounding scheme needed??
+                    self.logger.debug("Discarding randomly chosen mapping {} for request {} due to violating constraints".
+                                      format(chosen_mapping, req))
             else:
+                # NOTE: in case of the cost variant this should never be the case because the variable values of the valid
+                # mappings sum up to 1.0
+                self.logger.debug("Not choosing any mapping for request {} in this randomized rounding iteration".format(req))
                 if lp_computation_mode != LPRecomputationMode.NONE:
                     for var in self.mapping_variables[req]:
                         var.ub = 0
