@@ -1855,6 +1855,8 @@ class SeparationLP_OptDynVMP(object):
 
 
 class RoundingOrder(enum.Enum):
+    # in case of the cost variant there is a heuristic when the rounding order does not matter, let's indicate it explicitly
+    NONE = "NONE"
     RANDOM = "RAND"
     STATIC_REQ_PROFIT = "STATIC_REQ_PROFIT"
     ACHIEVED_REQ_PROFIT = "ACHIEVED_REQ_PROFIT"
@@ -1971,7 +1973,8 @@ class RandRoundSepLPOptDynVMPCollection(object):
                  gurobi_settings=None,
                  logger=None,
                  calculate_cost_of_integral_solutions=False,
-                 skip_zero_profit_reqs_at_rounding_iteration=True):
+                 skip_zero_profit_reqs_at_rounding_iteration=True,
+                 allow_resource_capacity_violations=False):
         self.scenario = scenario
         self.substrate = self.scenario.substrate
         self.requests = self.scenario.requests
@@ -1992,7 +1995,6 @@ class RandRoundSepLPOptDynVMPCollection(object):
             elif isinstance(rounding_order, RoundingOrder):
                 self.rounding_order_list.append(rounding_order)
             else:
-                # TODO (NB): maybe new ones are needed
                 raise ValueError("Cannot handle this rounding order.")
 
         for lp_recomputation_mode in lp_recomputation_mode_list:
@@ -2024,6 +2026,7 @@ class RandRoundSepLPOptDynVMPCollection(object):
             self.logger = logger
         self.calculate_cost_of_integral_solutions = calculate_cost_of_integral_solutions
         self.skip_zero_profit_reqs_at_rounding_iteration = skip_zero_profit_reqs_at_rounding_iteration
+        self.allow_resource_capacity_violations = allow_resource_capacity_violations
 
     def check_supported_objective(self):
         '''Raised ValueError if a not supported objective is found in the input scenario
@@ -2511,14 +2514,29 @@ class RandRoundSepLPOptDynVMPCollection(object):
 
         for lp_computation_mode in actual_lp_computation_modes:
             for rounding_order in self.rounding_order_list:
-                result_list = self.round_solution_without_violations(lp_computation_mode, rounding_order)
+                if not self.allow_resource_capacity_violations:
+                    result_list = self.round_solution_without_violations(lp_computation_mode, rounding_order)
+                else:
+                    # NOTE: currently we have only one lp recomp and rounding order each for this variant, but there might be more
+                    result_list = self.round_solution_with_violations(lp_computation_mode, rounding_order)
                 if len(result_list) == 0:
-                    self.logger.info("LP computation mode {} with rounding order {} did not find constraint "
-                                     "non-violating solution".format(lp_computation_mode, rounding_order))
+                    self.logger.info("LP computation mode {} with rounding order {} did not find any solution, "
+                                     "constraint validation allowed: {}".format(lp_computation_mode, rounding_order,
+                                                                                self.allow_resource_capacity_violations))
                 for solution in result_list:
                     self.result.add_solution(rounding_order, lp_computation_mode, solution=solution)
         self.validate_randomized_rounding_solutions()
         self.logger.debug(self.result._get_solution_overview())
+
+    def round_solution_with_violations(self, lp_computation_mode, rounding_order):
+        """
+        Returns list of integers solutions of the given randomized rounding setting.
+
+        :param lp_computation_mode:
+        :param rounding_order:
+        :return:
+        """
+        raise NotImplementedError("Allowing capacity violations for profit variant is not implemented.")
 
     def round_solution_without_violations(self, lp_computation_mode, rounding_order):
 
@@ -2526,7 +2544,8 @@ class RandRoundSepLPOptDynVMPCollection(object):
 
         result_list = []
 
-        self.logger.debug("Executing rounding according to settings: {} {}".format(lp_computation_mode.value, rounding_order.value))
+        self.logger.debug("Executing rounding (without allowing capacity violations) according to settings: {} {}".
+                          format(lp_computation_mode.value, rounding_order.value))
 
         for q in xrange(self.rounding_samples_per_lp_recomputation_mode[lp_computation_mode]):
             #recompute optimal solution

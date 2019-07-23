@@ -22,11 +22,12 @@
 import time
 import copy
 import math
+import random
 
 from gurobipy import GRB
 
 import treewidth_model as twm
-from alib import datamodel
+from alib import datamodel, solutions
 
 
 EPSILON = 0.00001
@@ -92,8 +93,13 @@ class RandRoundSepLPOptDynVMPCollectionForFogModel(twm.RandRoundSepLPOptDynVMPCo
                  rounding_samples_per_lp_recomputation_mode,
                  number_initial_mappings_to_compute,
                  number_further_mappings_to_add,
+                 max_rounding_trials=10,
+                 rounding_solution_quality=2.0,
+                 link_capacity_violation_ratio=None,
+                 node_capacity_violation_ratio=None,
                  gurobi_settings=None,
-                 logger=None):
+                 logger=None,
+                 allow_resource_capacity_violations=True):
         super(RandRoundSepLPOptDynVMPCollectionForFogModel, self).__init__(scenario,
                                                                              rounding_order_list,
                                                                              lp_recomputation_mode_list,
@@ -103,11 +109,9 @@ class RandRoundSepLPOptDynVMPCollectionForFogModel(twm.RandRoundSepLPOptDynVMPCo
                                                                              number_further_mappings_to_add,
                                                                              gurobi_settings,
                                                                              logger,
+                                                                           allow_resource_capacity_violations=allow_resource_capacity_violations,
                                                                            skip_zero_profit_reqs_at_rounding_iteration=False,
                                                                            calculate_cost_of_integral_solutions=True)
-
-        if len(self.rounding_order_list) != 1 or twm.RoundingOrder.RANDOM not in self.rounding_order_list:
-            raise ValueError("Cost variant only supports RANDOM randomized rounding order!")
         # create a profit variant from the base class
         scenario_with_unit_profit = copy.deepcopy(scenario)
         scenario_with_unit_profit.objective = datamodel.Objective.MAX_PROFIT
@@ -124,6 +128,25 @@ class RandRoundSepLPOptDynVMPCollectionForFogModel(twm.RandRoundSepLPOptDynVMPCo
                                                                              logger.getChild("ProfitVariantForInitialization"))
         self.profit_variant_algorithm_instance.init_model_creator()
         # prevent rounding operation to discard requests without profit (and maintian compatibility with the original rounding scheme).
+
+        if self.allow_resource_capacity_violations and \
+                (len(self.lp_recomputation_list) > 1 or len(self.rounding_order_list) > 1):
+            self.logger.warn("Some LP recomputation modes and rounding orders are ignored...")
+
+        if self.allow_resource_capacity_violations and \
+                (twm.LPRecomputationMode.NONE not in self.lp_recomputation_list or twm.RoundingOrder.NONE not in self.rounding_order_list):
+            raise ValueError("Allowing capacity violations can only run with NONE rounding order and NONE LP computation settings")
+
+        if self.allow_resource_capacity_violations and \
+                (node_capacity_violation_ratio is None or link_capacity_violation_ratio is None):
+            raise ValueError("If allow_resource_capacity_violations is True, the violation ratios must be given!")
+
+        # a.k.a. beta in the publications
+        self.node_capacity_violation_ratio = float(node_capacity_violation_ratio)
+        # a.k.a. gamma in the publications
+        self.link_capacity_violation_ratio = float(link_capacity_violation_ratio)
+        self.max_rounding_trials = int(max_rounding_trials)
+        self.rounding_solution_quality = float(rounding_solution_quality)
 
     def check_supported_objective(self):
         '''Raised ValueError if a not supported objective is found in the input scenario
@@ -357,6 +380,103 @@ class RandRoundSepLPOptDynVMPCollectionForFogModel(twm.RandRoundSepLPOptDynVMPCo
         self.mapping_variables[req].extend(current_new_variables)
         self.logger.debug("Introduced {} new mappings for {}".format(len(current_new_variables), req.name))
 
+    def rounding_iteration_with_violations(self, filtered_mappings_of_requests):
+        """
+        Chooses a mapping for each of the requests, calculates capacity violation ratios of the resulting overall solution
+
+        :param total_allocations:
+        :param filtered_mappings_of_requests:
+        :return:
+        """
+        total_allocations = {}
+        scenario_solution = solutions.IntegralScenarioSolution(name="", scenario=self.scenario)
+        # it is 0, but let's administer it for possible later extensions, and framework compatibility
+        total_profit = 0.0
+        for req, list_of_mappings_with_probs in filtered_mappings_of_requests.iteritems():
+            # NOTE: without inicialization it might give different mappings if ran 2x on the same setting
+            p = random.random()
+            total_p = 0.0
+            chosen_mapping = None
+            for X, original_mapping_idx, mapping in list_of_mappings_with_probs:
+                total_p += X
+                if p < total_p:
+                    chosen_mapping = (original_mapping_idx, mapping)
+                    break
+            if chosen_mapping is None:
+                raise ValueError("No mapping is chosen, values MUST add up to 1.0 at this point...")
+            # administer resource reservations of the mapping
+            for res in self.substrate_resources:
+                if res in self.allocations_of_mappings[req][chosen_mapping[0]].keys():
+                    total_allocations[res] += self.allocations_of_mappings[req][chosen_mapping[0]][res]
+            total_profit += req.profit
+            scenario_solution.add_mapping(req, chosen_mapping[1])
+
+        max_node_load, max_edge_load = self.calc_max_loads(total_allocations)
+        total_cost = self.calc_cost_of_integral_solution(scenario_solution, total_allocations)
+        return scenario_solution, total_profit, total_cost, max_node_load, max_edge_load
+
+    def round_solution_with_violations(self, lp_computation_mode, rounding_order):
+        """
+        Returns list of integers solutions of the given randomized rounding setting for the cost variant.
+
+        :param lp_computation_mode:
+        :param rounding_order:
+        :return:
+        """
+        result_list = []
+        self.logger.debug("Executing rounding (without allowing capacity violations) according to settings: {} {}".
+                          format(lp_computation_mode.value, rounding_order.value))
+        # this function is only prepared for this combination
+        if lp_computation_mode is not twm.LPRecomputationMode.NONE or rounding_order is not twm.RoundingOrder.NONE:
+            return result_list
+
+        self.model.optimize()
+
+        filtered_mappings_of_requests = {req: list() for req in self.requests}
+        for req in self.requests:
+            weighted_average_cost_of_req = 0.0
+            for mapping_index, mapping in enumerate(self.mappings_of_requests[req]):
+                allocations_of_sinlge_valid_mapping = self._compute_allocations(req, mapping)
+                total_cost_of_mapping = self.calculate_total_cost_of_single_valid_mapping(allocations_of_sinlge_valid_mapping)
+                weighted_average_cost_of_req += self.mapping_variables[req][mapping_index].X * total_cost_of_mapping
+            # filter costly mappings
+            for mapping_index, mapping in enumerate(self.mappings_of_requests[req]):
+                allocations_of_sinlge_valid_mapping = self._compute_allocations(req, mapping)
+                total_cost_of_mapping = self.calculate_total_cost_of_single_valid_mapping(allocations_of_sinlge_valid_mapping)
+                if total_cost_of_mapping < self.rounding_solution_quality * weighted_average_cost_of_req:
+                    # the gurobi variable is not needed, just its value
+                    filtered_mappings_of_requests[req].append((self.mapping_variables[req][mapping_index].X, mapping_index, mapping))
+            if len(filtered_mappings_of_requests[req]) > 1:
+                sum_of_remaining_mappings = sum(map(lambda t: t[0], filtered_mappings_of_requests[req]))
+                # normalize the weights so they add up to 1.0
+                filtered_mappings_of_requests[req] = map(lambda t: (t[0] / float(sum_of_remaining_mappings), t[1], t[2]),
+                                                         filtered_mappings_of_requests[req])
+            else:
+                # TODO: what to do, the solution is infeasible
+                pass
+
+        rounding_trial = 1
+        # initialize with some big value
+        current_solution_quality = 10.0 * self.rounding_solution_quality
+        while rounding_trial < self.max_rounding_trials and current_solution_quality > self.rounding_solution_quality:
+            time_rr0 = time.time()
+
+            solution, profit, cost, max_node_load, max_edge_load = \
+                self.rounding_iteration_with_violations(filtered_mappings_of_requests)
+
+            time_rr = time.time() - time_rr0
+
+            # TODO Only allow solutions which meet the capacity violation ratios
+            solution_tuple = twm.RandomizedRoundingSolution(solution=solution,
+                                                            profit=profit,
+                                                            cost=cost,
+                                                            max_node_load=max_node_load,
+                                                            max_edge_load=max_edge_load,
+                                                            time_to_round_solution=time_rr)
+
+            result_list.append(solution_tuple)
+        return result_list
+
     def validate_randomized_rounding_solutions(self):
         """
         Checks if all requests are mapped after the randomized rounding as required by the constraints.
@@ -381,3 +501,4 @@ class RandRoundSepLPOptDynVMPCollectionForFogModel(twm.RandRoundSepLPOptDynVMPCo
         if not is_result_still_feasible:
             self.logger.info("Setting result infeasible, because none of the integral solutions after the randomized rounding maps all requests.")
         self.result.overall_feasible = is_result_still_feasible
+
