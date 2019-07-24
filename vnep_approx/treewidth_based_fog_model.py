@@ -296,6 +296,7 @@ class RandRoundSepLPOptDynVMPCollectionForFogModel(twm.RandRoundSepLPOptDynVMPCo
             opt_cost = dynvmp_instance.get_optimal_solution_cost()
             if opt_cost is not None:
                 # the cost variant is violated if this is negative
+                # TODO: REVISIT dual violation req calculation
                 dual_violation_of_req = (opt_cost - self.dual_costs_requests[req])
                 if dual_violation_of_req < 0:
                     total_dual_violations += (-dual_violation_of_req)
@@ -389,21 +390,23 @@ class RandRoundSepLPOptDynVMPCollectionForFogModel(twm.RandRoundSepLPOptDynVMPCo
         :return:
         """
         total_allocations = {}
+        self._initialize_allocations_dict(total_allocations)
         scenario_solution = solutions.IntegralScenarioSolution(name="", scenario=self.scenario)
         # it is 0, but let's administer it for possible later extensions, and framework compatibility
         total_profit = 0.0
         for req, list_of_mappings_with_probs in filtered_mappings_of_requests.iteritems():
-            # NOTE: without inicialization it might give different mappings if ran 2x on the same setting
+            # NOTE: without random module inicialization it might give different mappings if ran 2x on the same setting
             p = random.random()
             total_p = 0.0
             chosen_mapping = None
+            # order of the list does not matter here, because we only check the resource violations on a complete mapping
             for X, original_mapping_idx, mapping in list_of_mappings_with_probs:
                 total_p += X
                 if p < total_p:
                     chosen_mapping = (original_mapping_idx, mapping)
                     break
             if chosen_mapping is None:
-                raise ValueError("No mapping is chosen, values MUST add up to 1.0 at this point...")
+                raise ValueError("No mapping is chosen, embedding variable values MUST add up to 1.0 at this point...")
             # administer resource reservations of the mapping
             for res in self.substrate_resources:
                 if res in self.allocations_of_mappings[req][chosen_mapping[0]].keys():
@@ -414,6 +417,47 @@ class RandRoundSepLPOptDynVMPCollectionForFogModel(twm.RandRoundSepLPOptDynVMPCo
         max_node_load, max_edge_load = self.calc_max_loads(total_allocations)
         total_cost = self.calc_cost_of_integral_solution(scenario_solution, total_allocations)
         return scenario_solution, total_profit, total_cost, max_node_load, max_edge_load
+
+    def filter_costly_mappings_of_requests(self, lower_cost_bound):
+        """
+        Discards all mapping for each request which are higher than a factor of weighted_average_cost_of_req.
+        Normalizes the remaining weights.
+
+        :return:
+        """
+        filtered_mappings_of_requests = {req: list() for req in self.requests}
+        for req in self.requests:
+            # we have to ensure this value is not zero, otherwise 0 cost optimal solutions are filtered
+            weighted_average_cost_of_req = 0.00001
+            for mapping_index, mapping in enumerate(self.mappings_of_requests[req]):
+                allocations_of_sinlge_valid_mapping = self._compute_allocations(req, mapping)
+                total_cost_of_mapping = self.calculate_total_cost_of_single_valid_mapping(allocations_of_sinlge_valid_mapping)
+                weighted_average_cost_of_req += self.mapping_variables[req][mapping_index].X * total_cost_of_mapping
+            # filter costly mappings
+            self.logger.debug("Filtering mapping for request {} which are more expensive "
+                              "than solution quaility: {} x weighted average cost {}".
+                              format(req.name, self.rounding_solution_quality, weighted_average_cost_of_req))
+            for mapping_index, mapping in enumerate(self.mappings_of_requests[req]):
+                # according to experiments current implementation is memory intensive, rather recalculate it than store it
+                allocations_of_sinlge_valid_mapping = self._compute_allocations(req, mapping)
+                total_cost_of_mapping = self.calculate_total_cost_of_single_valid_mapping(allocations_of_sinlge_valid_mapping)
+                if total_cost_of_mapping < self.rounding_solution_quality * weighted_average_cost_of_req:
+                    # the gurobi variable is not needed, just its value
+                    filtered_mappings_of_requests[req].append((self.mapping_variables[req][mapping_index].X, mapping_index, mapping))
+            if len(filtered_mappings_of_requests[req]) > 0:
+                sum_of_remaining_mappings = sum(map(lambda t: t[0], filtered_mappings_of_requests[req]))
+                # normalize the weights so they add up to 1.0
+                filtered_mappings_of_requests[req] = map(lambda t: (t[0] / float(sum_of_remaining_mappings), t[1], t[2]),
+                                                         filtered_mappings_of_requests[req])
+            else:
+                # other (currently non-existing) RR heuristics might find solution, Infeasibility is set by
+                # validate_randomized_rounding_solutions.
+                self.logger.info("All valid mappings of request {} are considered costly, solution cannot be feasible with "
+                                 "current randomized rounding heuristic".format(req.name))
+                return None
+            self.logger.debug("Filtered {} costly valid mappings for request {}".format(
+                len(self.mapping_variables[req]) - len(filtered_mappings_of_requests[req]), req.name))
+        return filtered_mappings_of_requests
 
     def round_solution_with_violations(self, lp_computation_mode, rounding_order):
         """
@@ -428,53 +472,63 @@ class RandRoundSepLPOptDynVMPCollectionForFogModel(twm.RandRoundSepLPOptDynVMPCo
                           format(lp_computation_mode.value, rounding_order.value))
         # this function is only prepared for this combination
         if lp_computation_mode is not twm.LPRecomputationMode.NONE or rounding_order is not twm.RoundingOrder.NONE:
+            self.logger.warn("Returning empty randomized roudning result list as this setting is not supported.")
             return result_list
 
         self.model.optimize()
+        solutionCount = self.model.getAttr("SolCount")
+        if solutionCount > 0:
+            # if there is a solution to the fractional variant, its objective value is our current lower bound for the integral solution
+            lower_cost_bound = self.model.getAttr("ObjVal")
+            self.logger.info("Best fractional solution cost value is {}".format(lower_cost_bound))
+        else:
+            self.logger.info("No solution found by the Separation LP, randomized rounding heuristic cannot start, returning no results.")
+            return result_list
 
-        filtered_mappings_of_requests = {req: list() for req in self.requests}
-        for req in self.requests:
-            weighted_average_cost_of_req = 0.0
-            for mapping_index, mapping in enumerate(self.mappings_of_requests[req]):
-                allocations_of_sinlge_valid_mapping = self._compute_allocations(req, mapping)
-                total_cost_of_mapping = self.calculate_total_cost_of_single_valid_mapping(allocations_of_sinlge_valid_mapping)
-                weighted_average_cost_of_req += self.mapping_variables[req][mapping_index].X * total_cost_of_mapping
-            # filter costly mappings
-            for mapping_index, mapping in enumerate(self.mappings_of_requests[req]):
-                allocations_of_sinlge_valid_mapping = self._compute_allocations(req, mapping)
-                total_cost_of_mapping = self.calculate_total_cost_of_single_valid_mapping(allocations_of_sinlge_valid_mapping)
-                if total_cost_of_mapping < self.rounding_solution_quality * weighted_average_cost_of_req:
-                    # the gurobi variable is not needed, just its value
-                    filtered_mappings_of_requests[req].append((self.mapping_variables[req][mapping_index].X, mapping_index, mapping))
-            if len(filtered_mappings_of_requests[req]) > 1:
-                sum_of_remaining_mappings = sum(map(lambda t: t[0], filtered_mappings_of_requests[req]))
-                # normalize the weights so they add up to 1.0
-                filtered_mappings_of_requests[req] = map(lambda t: (t[0] / float(sum_of_remaining_mappings), t[1], t[2]),
-                                                         filtered_mappings_of_requests[req])
-            else:
-                # TODO: what to do, the solution is infeasible
-                pass
+        filtered_mappings_of_requests = self.filter_costly_mappings_of_requests(lower_cost_bound)
+        if filtered_mappings_of_requests is None:
+            # if for some reason the filtering was not successful
+            return result_list
 
         rounding_trial = 1
-        # initialize with some big value
-        current_solution_quality = 10.0 * self.rounding_solution_quality
-        while rounding_trial < self.max_rounding_trials and current_solution_quality > self.rounding_solution_quality:
+        best_solution_cost = None
+        while rounding_trial < self.max_rounding_trials:
             time_rr0 = time.time()
 
             solution, profit, cost, max_node_load, max_edge_load = \
                 self.rounding_iteration_with_violations(filtered_mappings_of_requests)
+            if len(solution.request_mapping) != len(self.requests):
+                self.logger.warn("Not all requests has a mapping in this rounding iteration! "
+                                 "This should never happen as the probabilities add up to 1.0")
+                # skip adding this bad solution (in case it would happen)
+            else:
+                # Only allow solutions which meet the capacity violation ratios
+                if max_node_load < self.node_capacity_violation_ratio and \
+                        max_edge_load < self.link_capacity_violation_ratio:
+                    self.logger.debug("Found integer solution with cost value {} and meets allowed capacity violations.".format(cost))
+                    if best_solution_cost is not None:
+                        # NOTE: administering the best solution is not necessary
+                        if cost < best_solution_cost:
+                            best_solution_cost = cost
+                            current_solution_quality = best_solution_cost / float(lower_cost_bound)
+                            self.logger.debug("Found integer solution with meeting approximation bounds, "
+                                              "so solution is at least {}-optimal.".format(current_solution_quality))
 
-            time_rr = time.time() - time_rr0
-
-            # TODO Only allow solutions which meet the capacity violation ratios
-            solution_tuple = twm.RandomizedRoundingSolution(solution=solution,
-                                                            profit=profit,
-                                                            cost=cost,
-                                                            max_node_load=max_node_load,
-                                                            max_edge_load=max_edge_load,
-                                                            time_to_round_solution=time_rr)
-
-            result_list.append(solution_tuple)
+                    else:
+                        # this is only at the first iteration, so we wont have to guess an initial value
+                        best_solution_cost = cost
+                    time_rr = time.time() - time_rr0
+                    solution_tuple = twm.RandomizedRoundingSolution(solution=solution,
+                                                                    profit=profit,
+                                                                    cost=cost,
+                                                                    max_node_load=max_node_load,
+                                                                    max_edge_load=max_edge_load,
+                                                                    time_to_round_solution=time_rr)
+                    result_list.append(solution_tuple)
+                else:
+                    self.logger.debug("Discarding solution because it violates capacities more than "
+                                      "allowed: node {}; link {}".format(max_node_load, max_edge_load))
+            rounding_trial += 1
         return result_list
 
     def validate_randomized_rounding_solutions(self):
