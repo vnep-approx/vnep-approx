@@ -283,7 +283,7 @@ class RandRoundSepLPOptDynVMPCollectionForFogModel(twm.RandRoundSepLPOptDynVMPCo
         :return:
         """
         new_columns_generated = False
-        total_dual_violations = 0
+        max_violation = 0
         for req in self.requests:
             if req in ignore_requests:
                 continue
@@ -296,25 +296,26 @@ class RandRoundSepLPOptDynVMPCollectionForFogModel(twm.RandRoundSepLPOptDynVMPCo
             opt_cost = dynvmp_instance.get_optimal_solution_cost()
             if opt_cost is not None:
                 # the cost variant is violated if this is negative
-                # TODO: REVISIT dual violation req calculation
                 dual_violation_of_req = (opt_cost - self.dual_costs_requests[req])
-                if dual_violation_of_req < 0:
-                    total_dual_violations += (-dual_violation_of_req)
+                if dual_violation_of_req < 0 and max_violation < (-dual_violation_of_req):
+                    max_violation = (-dual_violation_of_req)
 
         # Gives objective bound following from the weak duality: scaling the dual variables (interpreted as resource costs) by a factor
         # of 1 + eps (where eps == dual_violation_of_req) gives a feasible dual solution increasing the objective value by at most 1 + eps
-        self._current_obj_bound = current_objective + total_dual_violations
+        self._current_obj_bound = current_objective + max_violation
 
         self._current_solution_quality = None
         if abs(current_objective) > 0.00001:
-            self._current_solution_quality = total_dual_violations / current_objective
+            # TODO: is this correct?
+            self._current_solution_quality = max_violation / current_objective
         else:
             self.logger.info("WARNING: Current objective is very close to zero; treating it as such.")
-            self._current_solution_quality = total_dual_violations
+            self._current_solution_quality = max_violation
 
         self.logger.info("\nCurrent LP solution value is {:10.5f}\n"
                            "Current dual lower bound is  {:10.5f}\n"
-                         "Accordingly, current solution is at least {}-optimal".format(current_objective, current_objective+total_dual_violations, 1+self._current_solution_quality))
+                         "Accordingly, current solution is at least {}-optimal".
+                         format(current_objective, self._current_obj_bound, 1+self._current_solution_quality))
 
         if self._current_solution_quality < self.lp_relative_quality:
             self.logger.info("Ending LP computation as found solution is {}-near optimal, which lies below threshold of {}".format(self._current_solution_quality, self.lp_relative_quality))
