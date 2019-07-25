@@ -93,7 +93,6 @@ class RandRoundSepLPOptDynVMPCollectionForFogModel(twm.RandRoundSepLPOptDynVMPCo
                  rounding_samples_per_lp_recomputation_mode,
                  number_initial_mappings_to_compute,
                  number_further_mappings_to_add,
-                 max_rounding_trials=10,
                  rounding_solution_quality=2.0,
                  link_capacity_violation_ratio=None,
                  node_capacity_violation_ratio=None,
@@ -146,7 +145,6 @@ class RandRoundSepLPOptDynVMPCollectionForFogModel(twm.RandRoundSepLPOptDynVMPCo
         self.node_capacity_violation_ratio = float(node_capacity_violation_ratio)
         # a.k.a. gamma in the publications
         self.link_capacity_violation_ratio = float(link_capacity_violation_ratio)
-        self.max_rounding_trials = int(max_rounding_trials)
         self.rounding_solution_quality = float(rounding_solution_quality)
 
     def check_supported_objective(self):
@@ -420,7 +418,7 @@ class RandRoundSepLPOptDynVMPCollectionForFogModel(twm.RandRoundSepLPOptDynVMPCo
         total_cost = self.calc_cost_of_integral_solution(scenario_solution, total_allocations)
         return scenario_solution, total_profit, total_cost, max_node_load, max_edge_load
 
-    def filter_costly_mappings_of_requests(self, lower_cost_bound):
+    def filter_costly_mappings_of_requests(self):
         """
         Discards all mapping for each request which are higher than a factor of weighted_average_cost_of_req.
         Normalizes the remaining weights.
@@ -487,14 +485,13 @@ class RandRoundSepLPOptDynVMPCollectionForFogModel(twm.RandRoundSepLPOptDynVMPCo
             self.logger.info("No solution found by the Separation LP, randomized rounding heuristic cannot start, returning no results.")
             return result_list
 
-        filtered_mappings_of_requests = self.filter_costly_mappings_of_requests(lower_cost_bound)
+        filtered_mappings_of_requests = self.filter_costly_mappings_of_requests()
         if filtered_mappings_of_requests is None:
             # if for some reason the filtering was not successful
             return result_list
 
-        rounding_trial = 1
         best_solution_cost = None
-        while rounding_trial < self.max_rounding_trials:
+        for q in xrange(self.rounding_samples_per_lp_recomputation_mode[lp_computation_mode]):
             time_rr0 = time.time()
 
             solution, profit, cost, max_node_load, max_edge_load = \
@@ -530,7 +527,6 @@ class RandRoundSepLPOptDynVMPCollectionForFogModel(twm.RandRoundSepLPOptDynVMPCo
                 else:
                     self.logger.debug("Discarding solution because it violates capacities more than "
                                       "allowed: node {}; link {}".format(max_node_load, max_edge_load))
-            rounding_trial += 1
         return result_list
 
     def validate_randomized_rounding_solutions(self):
