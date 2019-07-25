@@ -1416,7 +1416,8 @@ class SeparationLP_OptDynVMP(object):
     def __init__(self,
                  scenario,
                  gurobi_settings=None,
-                 logger=None):
+                 logger=None,
+                 number_further_mappings_to_add=5):
         self.scenario = scenario
         self.substrate = self.scenario.substrate
         self.requests = self.scenario.requests
@@ -1446,6 +1447,8 @@ class SeparationLP_OptDynVMP(object):
             self.logger = util.get_logger(__name__, make_file=False, propagate=True)
         else:
             self.logger = logger
+
+        self.number_further_mappings_to_add = number_further_mappings_to_add
 
     def init_model_creator(self):
         ''' Initializes the modelcreator by generating the model. Afterwards, model.compute() can be called to let
@@ -1611,7 +1614,8 @@ class SeparationLP_OptDynVMP(object):
             self.dynvmp_runtimes_computation[req].append(time.time() - single_dynvmp_runtime)
             opt_cost = dynvmp_instance.get_optimal_solution_cost()
             if opt_cost is not None and opt_cost < 0.995*(req.profit - self.dual_costs_requests[req]):
-                self.introduce_new_columns(req, maximum_number_of_columns_to_introduce=5, cutoff = req.profit-self.dual_costs_requests[req])
+                self.introduce_new_columns(req, maximum_number_of_columns_to_introduce=self.number_further_mappings_to_add,
+                                           cutoff = req.profit-self.dual_costs_requests[req])
                 new_columns_generated = True
 
         return new_columns_generated

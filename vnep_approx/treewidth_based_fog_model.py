@@ -125,7 +125,8 @@ class RandRoundSepLPOptDynVMPCollectionForFogModel(twm.RandRoundSepLPOptDynVMPCo
         # we do not need the randomized rounding in this case, so a simple separation LP is enough
         self.profit_variant_algorithm_instance = twm.SeparationLP_OptDynVMP(scenario_with_unit_profit,
                                                                              gurobi_settings,
-                                                                             logger.getChild("ProfitVariantForInitialization"))
+                                                                             logger.getChild("ProfitVariantForInitialization"),
+                                                                            number_further_mappings_to_add=self.number_further_mappings_to_add)
         self.profit_variant_algorithm_instance.init_model_creator()
         # prevent rounding operation to discard requests without profit (and maintian compatibility with the original rounding scheme).
 
