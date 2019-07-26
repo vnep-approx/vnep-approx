@@ -1417,7 +1417,8 @@ class SeparationLP_OptDynVMP(object):
                  scenario,
                  gurobi_settings=None,
                  logger=None,
-                 number_further_mappings_to_add=5):
+                 number_further_mappings_to_add=5,
+                 number_initial_mappings_to_compute=100):
         self.scenario = scenario
         self.substrate = self.scenario.substrate
         self.requests = self.scenario.requests
@@ -1449,6 +1450,7 @@ class SeparationLP_OptDynVMP(object):
             self.logger = logger
 
         self.number_further_mappings_to_add = number_further_mappings_to_add
+        self.number_initial_mappings_to_compute = number_initial_mappings_to_compute
 
     def init_model_creator(self):
         ''' Initializes the modelcreator by generating the model. Afterwards, model.compute() can be called to let
@@ -1664,7 +1666,7 @@ class SeparationLP_OptDynVMP(object):
             opt_cost = dynvmp_instance.get_optimal_solution_cost()
             if opt_cost is not None:
                 self.logger.debug("Introducing new columns for {}".format(req.name))
-                self.introduce_new_columns(req, maximum_number_of_columns_to_introduce=100)
+                self.introduce_new_columns(req, maximum_number_of_columns_to_introduce=self.number_initial_mappings_to_compute)
 
         self.model.update()
 

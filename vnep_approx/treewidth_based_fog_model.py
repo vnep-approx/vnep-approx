@@ -125,7 +125,8 @@ class RandRoundSepLPOptDynVMPCollectionForFogModel(twm.RandRoundSepLPOptDynVMPCo
         self.profit_variant_algorithm_instance = twm.SeparationLP_OptDynVMP(scenario_with_unit_profit,
                                                                              gurobi_settings,
                                                                              logger.getChild("ProfitVariantForInitialization"),
-                                                                            number_further_mappings_to_add=self.number_further_mappings_to_add)
+                                                                            number_further_mappings_to_add=self.number_further_mappings_to_add,
+                                                                            number_initial_mappings_to_compute=self.number_initial_mappings_to_compute)
         self.profit_variant_algorithm_instance.init_model_creator()
         # prevent rounding operation to discard requests without profit (and maintian compatibility with the original rounding scheme).
 
@@ -174,14 +175,19 @@ class RandRoundSepLPOptDynVMPCollectionForFogModel(twm.RandRoundSepLPOptDynVMPCo
         #update dual costs
         for snode in self.snodes:
             # the dual variables' value must be non positive
-            if self.capacity_constraints[snode].Pi > 0:
-                raise ValueError("Found positive dual value for node resource cost!")
-            self.dual_costs_node_resources[snode] = self.substrate.node[snode]['cost'][self.universal_node_type] -\
-                                                                                    self.capacity_constraints[snode].Pi
+            pi_node = self.capacity_constraints[snode].Pi
+            if EPSILON > pi_node > 0.0:
+                pi_node = 0.0
+            elif pi_node > EPSILON:
+                raise ValueError("Found positive dual value {} for node resource {} cost!".format(pi_node, snode))
+            self.dual_costs_node_resources[snode] = self.substrate.node[snode]['cost'][self.universal_node_type] - pi_node
         for sedge in self.sedges:
-            if self.capacity_constraints[sedge].Pi > 0:
-                raise ValueError("Found positive dual value for edge resource cost!")
-            self.dual_costs_edge_resources[sedge] = self.substrate.edge[sedge]['cost'] - self.capacity_constraints[sedge].Pi
+            pi_edge = self.capacity_constraints[sedge].Pi
+            if EPSILON > pi_edge > 0.0:
+                pi_edge = 0.0
+            elif pi_edge > EPSILON:
+                raise ValueError("Found positive dual value {} for edge resource {} cost!".format(pi_edge, sedge))
+            self.dual_costs_edge_resources[sedge] = self.substrate.edge[sedge]['cost'] - pi_edge
         # its meaning is unchanged compared to the profit variant, but the domain is different, which affects the constraint separation
         # decisions
         for req in self.requests:
@@ -455,8 +461,8 @@ class RandRoundSepLPOptDynVMPCollectionForFogModel(twm.RandRoundSepLPOptDynVMPCo
                 self.logger.info("All valid mappings of request {} are considered costly, solution cannot be feasible with "
                                  "current randomized rounding heuristic".format(req.name))
                 return None
-            self.logger.debug("Filtered {} costly valid mappings for request {}".format(
-                len(self.mapping_variables[req]) - len(filtered_mappings_of_requests[req]), req.name))
+            self.logger.debug("Filtered {} costly valid mappings out of {} mapping for request {}".format(
+                len(self.mapping_variables[req]) - len(filtered_mappings_of_requests[req]), len(self.mapping_variables[req]), req.name))
         return filtered_mappings_of_requests
 
     def round_solution_with_violations(self, lp_computation_mode, rounding_order):
