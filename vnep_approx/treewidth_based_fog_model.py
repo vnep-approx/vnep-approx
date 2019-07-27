@@ -98,7 +98,8 @@ class RandRoundSepLPOptDynVMPCollectionForFogModel(twm.RandRoundSepLPOptDynVMPCo
                  node_capacity_violation_ratio=None,
                  gurobi_settings=None,
                  logger=None,
-                 allow_resource_capacity_violations=True):
+                 allow_resource_capacity_violations=True,
+                 restrict_edge_mapping_to_fixed_paths=False):
         super(RandRoundSepLPOptDynVMPCollectionForFogModel, self).__init__(scenario,
                                                                              rounding_order_list,
                                                                              lp_recomputation_mode_list,
@@ -110,7 +111,8 @@ class RandRoundSepLPOptDynVMPCollectionForFogModel(twm.RandRoundSepLPOptDynVMPCo
                                                                              logger,
                                                                            allow_resource_capacity_violations=allow_resource_capacity_violations,
                                                                            skip_zero_profit_reqs_at_rounding_iteration=False,
-                                                                           calculate_cost_of_integral_solutions=True)
+                                                                           calculate_cost_of_integral_solutions=True,
+                                                                           restrict_edge_mapping_to_fixed_paths=restrict_edge_mapping_to_fixed_paths)
         # create a profit variant from the base class
         scenario_with_unit_profit = copy.deepcopy(scenario)
         scenario_with_unit_profit.objective = datamodel.Objective.MAX_PROFIT
@@ -126,7 +128,8 @@ class RandRoundSepLPOptDynVMPCollectionForFogModel(twm.RandRoundSepLPOptDynVMPCo
                                                                              gurobi_settings,
                                                                              logger.getChild("ProfitVariantForInitialization"),
                                                                             number_further_mappings_to_add=self.number_further_mappings_to_add,
-                                                                            number_initial_mappings_to_compute=self.number_initial_mappings_to_compute)
+                                                                            number_initial_mappings_to_compute=self.number_initial_mappings_to_compute,
+                                                                            restrict_edge_mapping_to_fixed_paths=self.restrict_edge_mapping_to_fixed_paths)
         self.profit_variant_algorithm_instance.init_model_creator()
         # prevent rounding operation to discard requests without profit (and maintian compatibility with the original rounding scheme).
 

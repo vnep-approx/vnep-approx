@@ -1024,9 +1024,12 @@ class OptimizedDynVMP(object):
 
     ''' The actual algorithm to compute optimal valid mappings using dynamic programming. Nearly all algorithmic challenging
         tasks are to be found in the implementation of the OptimizedDynVMPNode class.
+        The restrict_edge_mapping_to_fixed_paths parameter fixes the the paths to be preselected shortest path between any pair
+        of substrate nodes. Cannot work together with edge mapping restrictions!
     '''
 
-    def __init__(self, substrate, request, ssntda, initial_snode_costs = None, initial_sedge_costs = None):
+    def __init__(self, substrate, request, ssntda, initial_snode_costs = None, initial_sedge_costs = None,
+                 restrict_edge_mapping_to_fixed_paths = False):
         self.substrate = substrate
         self.request = request
         if not isinstance(ssntda, SmallSemiNiceTDArb):
@@ -1034,6 +1037,8 @@ class OptimizedDynVMP(object):
         self.ssntda = ssntda
 
         self._initialize_costs(initial_snode_costs, initial_sedge_costs)
+
+        self.restrict_edge_mapping_to_fixed_paths = restrict_edge_mapping_to_fixed_paths
 
         self.vmrc = ValidMappingRestrictionComputer(substrate=substrate, request=request)
         self.svpc = ShortestValidPathsComputer(substrate=substrate, request=request, valid_mapping_restriction_computer=self.vmrc, edge_costs=self.sedge_costs)
@@ -1064,6 +1069,10 @@ class OptimizedDynVMP(object):
         self.svpc.compute()
 
         self.sorted_snodes = sorted(list(self.substrate.nodes))
+        if self.restrict_edge_mapping_to_fixed_paths:
+            self.fixed_paths_for_edge_mapping = {(snode_1,snode_2) : self.shortest_path(snode_1, snode_2, 0)
+                                                    for (snode_1,snode_2) in itertools.product(self.sorted_snodes, self.sorted_snodes)}
+
         self.sorted_snode_index = {snode : self.sorted_snodes.index(snode) for snode in self.sorted_snodes}
 
         self.number_of_nodes = len(self.sorted_snodes)
@@ -1161,17 +1170,19 @@ class OptimizedDynVMP(object):
             result.append(self.recover_mapping(root_mapping_index=mapping_index)[1])
         return result
 
-
     def _reconstruct_edge_mapping(self, reqedge, source_mapping, target_mapping):
-        reqedge_predecessors = self.svpc.valid_sedge_pred[reqedge][source_mapping]
-        u = target_mapping
-        path = []
-        while u != source_mapping:
-            pred = reqedge_predecessors[u]
-            path.append((pred, u))
-            u = pred
-        path = list(reversed(path))
-        return path
+        if self.restrict_edge_mapping_to_fixed_paths:
+            return self.fixed_paths_for_edge_mapping[(source_mapping, target_mapping)]
+        else:
+            reqedge_predecessors = self.svpc.valid_sedge_pred[reqedge][source_mapping]
+            u = target_mapping
+            path = []
+            while u != source_mapping:
+                pred = reqedge_predecessors[u]
+                path.append((pred, u))
+                u = pred
+            path = list(reversed(path))
+            return path
 
     def _recover_node_mapping(self, root_mapping_index = None):
         fixed_node_mappings = {}
@@ -1231,6 +1242,33 @@ class OptimizedDynVMP(object):
 
         for t in self.ssntda.post_order_traversal:
             self.dynvmp_tree_nodes[t].reinitialize()
+
+    def shortest_path(self, start, target, min_capacity):
+        # Copied from the DynVMPAlgorithm
+        # Dijkstra algorithm (https://en.wikipedia.org/wiki/Dijkstra%27s_algorithm#Pseudocode)
+        distance = {node: INFINITY for node in self.substrate.nodes}
+        prev = {u: None for u in self.substrate.nodes}
+        distance[start] = 0
+        q = set(self.substrate.nodes)
+        while q:
+            u = min(q, key=lambda x: distance[x])
+            if u == target:
+                break
+            q.remove(u)
+            for uv in self.substrate.get_out_edges(u):
+                if self.substrate.get_edge_capacity(uv) < min_capacity:
+                    continue  # avoid using edges that are too small
+                v = uv[1]
+                new_dist = distance[u] + self.substrate.get_edge_cost(uv)
+                if new_dist < distance[v]:
+                    distance[v] = new_dist
+                    prev[v] = u
+        path = []
+        u = target
+        while u is not start:
+            path.append((prev[u], u))
+            u = prev[u]
+        return list(reversed(path))
 
 
 """ Computing tree decompositions """
@@ -1418,7 +1456,8 @@ class SeparationLP_OptDynVMP(object):
                  gurobi_settings=None,
                  logger=None,
                  number_further_mappings_to_add=5,
-                 number_initial_mappings_to_compute=100):
+                 number_initial_mappings_to_compute=100,
+                 restrict_edge_mapping_to_fixed_paths=False):
         self.scenario = scenario
         self.substrate = self.scenario.substrate
         self.requests = self.scenario.requests
@@ -1451,6 +1490,7 @@ class SeparationLP_OptDynVMP(object):
 
         self.number_further_mappings_to_add = number_further_mappings_to_add
         self.number_initial_mappings_to_compute = number_initial_mappings_to_compute
+        self.restrict_edge_mapping_to_fixed_paths = restrict_edge_mapping_to_fixed_paths
 
     def init_model_creator(self):
         ''' Initializes the modelcreator by generating the model. Afterwards, model.compute() can be called to let
@@ -1516,7 +1556,8 @@ class SeparationLP_OptDynVMP(object):
                                          req,
                                          self.tree_decomps[req],
                                          initial_snode_costs=self.dual_costs_node_resources,
-                                         initial_sedge_costs=self.dual_costs_edge_resources)
+                                         initial_sedge_costs=self.dual_costs_edge_resources,
+                                         restrict_edge_mapping_to_fixed_paths=self.restrict_edge_mapping_to_fixed_paths)
             opt_dynvmp.initialize_data_structures()
             self.dynvmp_runtimes_initialization[req].append(time.time()-dynvmp_init_time)
             self.dynvmp_instances[req] = opt_dynvmp
@@ -1980,7 +2021,8 @@ class RandRoundSepLPOptDynVMPCollection(object):
                  logger=None,
                  calculate_cost_of_integral_solutions=False,
                  skip_zero_profit_reqs_at_rounding_iteration=True,
-                 allow_resource_capacity_violations=False):
+                 allow_resource_capacity_violations=False,
+                 restrict_edge_mapping_to_fixed_paths=False):
         self.scenario = scenario
         self.substrate = self.scenario.substrate
         self.requests = self.scenario.requests
@@ -2033,6 +2075,7 @@ class RandRoundSepLPOptDynVMPCollection(object):
         self.calculate_cost_of_integral_solutions = calculate_cost_of_integral_solutions
         self.skip_zero_profit_reqs_at_rounding_iteration = skip_zero_profit_reqs_at_rounding_iteration
         self.allow_resource_capacity_violations = allow_resource_capacity_violations
+        self.restrict_edge_mapping_to_fixed_paths = restrict_edge_mapping_to_fixed_paths
 
     def check_supported_objective(self):
         '''Raised ValueError if a not supported objective is found in the input scenario
@@ -2112,7 +2155,8 @@ class RandRoundSepLPOptDynVMPCollection(object):
                                          req,
                                          self.tree_decomps[req],
                                          initial_snode_costs=self.dual_costs_node_resources,
-                                         initial_sedge_costs=self.dual_costs_edge_resources)
+                                         initial_sedge_costs=self.dual_costs_edge_resources,
+                                         restrict_edge_mapping_to_fixed_paths=self.restrict_edge_mapping_to_fixed_paths)
             opt_dynvmp.initialize_data_structures()
             self.dynvmp_runtimes_initialization[req].append(time.time()-dynvmp_init_time)
             self.dynvmp_instances[req] = opt_dynvmp
