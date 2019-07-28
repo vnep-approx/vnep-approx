@@ -518,10 +518,13 @@ class RandRoundSepLPOptDynVMPCollectionForFogModel(twm.RandRoundSepLPOptDynVMPCo
                         # NOTE: administering the best solution is not necessary
                         if cost < best_solution_cost:
                             best_solution_cost = cost
-                            current_solution_quality = best_solution_cost / float(lower_cost_bound)
-                            self.logger.debug("Found integer solution with meeting approximation bounds, "
-                                              "so solution is at least {}-optimal.".format(current_solution_quality))
-
+                            if lower_cost_bound > 0:
+                                current_solution_quality = best_solution_cost / float(lower_cost_bound)
+                                self.logger.debug("Found integer solution with meeting approximation bounds, "
+                                                "so solution is at least {}-optimal.".format(current_solution_quality))
+                            else:
+                                self.logger.debug("Current lower bound is based on fractional solution is 0.0, current best "
+                                                  "solution integer solution is {}".format(best_solution_cost))
                     else:
                         # this is only at the first iteration, so we wont have to guess an initial value
                         best_solution_cost = cost
