@@ -139,7 +139,8 @@ class GreedyBorderAllocationForFogModel(object):
             feasible = False
         return self.construct_results_object(result, feasible=feasible)
 
-    # AppGraph, Substrate: networkx graphs with capacity/demand as attributes
+    # AppGraph: container of networkx graphs with demand as weight attribute
+    # Substrate: networkx graphs with capacity as weight attribute
     # LocationBound: dictionary AppGraph node to  Substrate Node
     def greedyBorderAllocation(self, AppGraph, Substrate, LbNodes):
         for e in Substrate.edges():
@@ -153,7 +154,8 @@ class GreedyBorderAllocationForFogModel(object):
         #    4: sBE ← SORTEDBORDEREDGES(AppGraph, µ)
         #    5: while ISINCOMPLETE(µ) do
         mu2 = {}
-        while len(mu) != len(AppGraph.nodes()):
+        num_appgraph_nodes = sum([len(graph.nodes()) for graph in AppGraph])
+        while len(mu) < num_appgraph_nodes:
             #    6: (a1, a2) ← NEXTEDGE(µ, sBE)
             e = self.nextEdge(AppGraph, Substrate, mu, self.sortedBorderEdges(AppGraph, mu))
             if e == None:
@@ -211,14 +213,16 @@ class GreedyBorderAllocationForFogModel(object):
 
     def sortedBorderEdges(self, AppGraph, mu):
         borderEdges = []
-        for e in AppGraph.edges(data='weight'):
-            if (e[0] in mu and not e[1] in mu):
-                borderEdges.append(e)
-            if (not e[0] in mu and e[1] in mu):
-                borderEdges.append((e[1], e[0], e[2]))
+        for g in AppGraph:
+            for e in g.edges(data='weight'):
+                if (e[0] in mu and not e[1] in mu):
+                    borderEdges.append(e)
+                if (not e[0] in mu and e[1] in mu):
+                    borderEdges.append(e)
         return sorted(borderEdges, key=lambda x: x[2])
 
     def nextFromDisjointPart(self, AppGraph, substrate, mu):
+        
         not_mapped = set([x for x in AppGraph.nodes() if x not in mu])
         for u in not_mapped:
             if len(set(AppGraph[u]).intersection(set(mu.keys()))) == 0:
