@@ -59,11 +59,28 @@ class GreedyBorderAllocationForFogModel(object):
         """
         substrate_alib = self.scenario.substrate
         if len(substrate_alib.types) > 1:
-            raise ValueError("GBA does not support NF types.")
+            raise NotImplementedError("GBA does not support NF types.")
         self.Substrate = nx.Graph()
         for ntype, snode in self.substrate_node_resources:
-            self.Substrate.add_node(snode, weight=self.scenario.substrate.node[snode]["capacity"][ntype])
+            self.Substrate.add_node(snode, weight=substrate_alib.node[snode]["capacity"][ntype])
+        for u, v in self.substrate_edge_resources:
+            self.Substrate.add_edge(u, v, weight=substrate_alib.edge[(u,v)]["capacity"])
 
+        if len(self.scenario.requests) > 1:
+            raise NotImplementedError("GBA does not support more requests")
+        request_alib = self.scenario.requests[0]
+        self.LbNodes = {}
+        # TODO: make request graphs directed
+        self.AppGraph = nx.Graph()
+        for rnode in request_alib.nodes:
+            self.AppGraph.add_node(rnode, weight=request_alib.get_node_demand(rnode))
+            allowed_nodes = request_alib.get_allowed_nodes(rnode)
+            if allowed_nodes is not None:
+                if len(allowed_nodes) > 1:
+                    raise NotImplementedError("GBA does not support multiple allowed nodes")
+                self.LbNodes[rnode] = allowed_nodes[0]
+        for i, j in request_alib.edges:
+            self.AppGraph.add_edge(i, j, weight=request_alib.get_edge_demand((i,j)))
 
     def construct_results_object(self, node_mapping, link_mapping):
         pass
