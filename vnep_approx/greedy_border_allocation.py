@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # MIT License
 #
 # Copyright (c) 2019 Yvonne-Anne Pignolet, Balazs Nemeth
@@ -20,10 +21,33 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
+"""
+Created on Thu Jul 25 22:18:58 2019
+
+@author: yvonne-annepignolet
+"""
+
 import random
 import networkx
 
-paths = {}
+
+
+class GreedyBorderAllocationForFogModel(object):
+
+    ALGORITHM_ID = "GreedyBorderAllocationForFogModel"
+
+    def __init__(self, scenario, logger, gurobi_settings=None):
+        self.scenario = scenario
+        self.logger = logger
+        # required by the framework, it is designed for gurobi based algos
+        self.gurobi_settings = gurobi_settings
+        self.paths = {}
+
+    def init_model_creator(self):
+        pass
+
+    def compute_integral_solution(self):
+        pass
 
 
 # AppGraph, Substrate: networkx graphs with capacity/demand as attributes
