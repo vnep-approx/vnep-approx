@@ -65,6 +65,8 @@ class GreedyBorderAllocationForFogModel(object):
         self.gurobi_settings = gurobi_settings
         self.paths = {}
         self.AppGraph, self.Substrate, self.LbNodes = None, None, None
+        if self.scenario == None:
+            return
 
         #
         self.substrate_resources = list(self.scenario.substrate.edges)
@@ -157,16 +159,16 @@ class GreedyBorderAllocationForFogModel(object):
         num_appgraph_nodes = sum([len(graph.nodes()) for graph in AppGraph])
         while len(mu) < num_appgraph_nodes:
             #    6: (a1, a2) ← NEXTEDGE(µ, sBE)
-            e = self.nextEdge(AppGraph, Substrate, mu, self.sortedBorderEdges(AppGraph, mu))
+            (e,g) = self.nextEdge(AppGraph, Substrate, mu)
             if e == None:
                 return mu
             #    7: f ← CLOSESTFEASIBLEFOGNODE(a2, µ(a1))
-            f = self.closestFeasibleFogNode(e, mu[e[0]], AppGraph, Substrate, mu)
+            f = self.closestFeasibleFogNode(e, g, AppGraph, Substrate, mu)
             #    8: if ISDEFINED(f) then
             if f != None:
                 #    9: ADDMAPPING(a2, f)
                 mu[e[1]] = f
-                self.updateSubstrate(e, mu[e[0]], mu[e[1]], AppGraph, Substrate, mu, mu2)
+                self.updateSubstrate(e, mu[e[0]], mu[e[1]], g, Substrate, mu, mu2)
             #    10: UPDATEBORDEREDGES(a2)
             #    11: else return 0
             else:
@@ -174,7 +176,7 @@ class GreedyBorderAllocationForFogModel(object):
         #    12: return µ
         return [mu, mu2]
 
-    def nextEdge(self, AppGraph, substrate, mu, sBE):
+    def nextEdge(self, AppGraph, substrate, mu):
         #    14: (a1, a2) ← LARGESTEDGE(sBE)
         #    15: if (ISDEFINED(µ(a1)) then return (a1, a2)
         #    16: (a1, f) ← NEXTFROMDISJOINTPART(µ)
@@ -199,14 +201,15 @@ class GreedyBorderAllocationForFogModel(object):
         #    14: (a1, a2) ← LARGESTEDGE(sBE)
         #    15: if (ISDEFINED(µ(a1)) then return (a1, a2)
         #    16: (a1, f) ← NEXTFROMDISJOINTPART(µ)
+        sBE = self.sortedBorderEdges(AppGraph, mu)
         while sBE == []:
-            (u, v) = self.nextFromDisjointPart(AppGraph, substrate, mu)
+            (u, g, v) = self.nextFromDisjointPart(AppGraph, substrate, mu)
             #    17: if ISDEFINED(f) then
             if (v == None):
                 return None
             #    18: ADDMAPPING(a1, f)
             mu[u] = v
-            substrate.node[v]['free'] -= AppGraph.node[u]['weight']
+            substrate.node[v]['free'] -= g.node[u]['weight']
             #    19: UPDATEBORDEREDGES(a1)
             sBE = self.sortedBorderEdges(AppGraph, mu)
         return sBE[-1]
@@ -216,32 +219,32 @@ class GreedyBorderAllocationForFogModel(object):
         for g in AppGraph:
             for e in g.edges(data='weight'):
                 if (e[0] in mu and not e[1] in mu):
-                    borderEdges.append(e)
+                    borderEdges.append((e,g))
                 if (not e[0] in mu and e[1] in mu):
-                    borderEdges.append(e)
-        return sorted(borderEdges, key=lambda x: x[2])
+                    borderEdges.append((e,g))
+        return sorted(borderEdges, key=lambda x: x[0][2])
 
     def nextFromDisjointPart(self, AppGraph, substrate, mu):
-        
-        not_mapped = set([x for x in AppGraph.nodes() if x not in mu])
-        for u in not_mapped:
-            if len(set(AppGraph[u]).intersection(set(mu.keys()))) == 0:
-                fit = [v for v in substrate.nodes() if substrate.node[v]['free'] >= AppGraph.node[u]['weight']]
-                if fit == []:
-                    return (None, None)
-                return (u, fit[0])
-        return (None, None)
+        for graph in AppGraph:
+            not_mapped = set([x for x in graph.nodes() if x not in mu])
+            for u in not_mapped:
+                if len(set(graph[u]).intersection(set(mu.keys()))) == 0:
+                    fit = [v for v in substrate.nodes() if substrate.node[v]['free'] >= graph.node[u]['weight']]
+                    if fit == []:
+                        return (None, None, None)
+                    return (u, graph, fit[0])
+        return (None, None, None)
 
-    def fits(self, e, u, v, AppGraph, Substrate):
+    def fits(self, e, u, v, graph, Substrate):
         p = self.paths[u][v]
         for i in range(len(p) - 1):
             if Substrate[p[i]][p[i + 1]]['free'] < e[2]:
                 return False
-        return Substrate.node[v]['free'] >= AppGraph.node[e[1]]['weight']
+        return Substrate.node[v]['free'] >= graph.node[e[1]]['weight']
 
 
-    def updateSubstrate(self, e, u, v, AppGraph, Substrate, mu, mu2):
-        Substrate.node[v]['free'] -= AppGraph.node[e[1]]['weight']
+    def updateSubstrate(self, e, u, v, graph, Substrate, mu, mu2):
+        Substrate.node[v]['free'] -= graph.node[e[1]]['weight']
         if u != v:
             p = self.paths[u][v]
             for i in range(len(p) - 1):
@@ -249,25 +252,31 @@ class GreedyBorderAllocationForFogModel(object):
             mu2[e] = p
 
     # e[0] embedded on u, e[1] not yet
-    def closestFeasibleFogNode(self, e, u, AppGraph, Substrate, mu):
-        sorted_nodes = sorted([v for v in Substrate.nodes()], key=lambda x: len(self.paths[u][x]))
-        for v in sorted_nodes:
-            if self.fits(e, u, v, AppGraph, Substrate):
-                return v
+    def closestFeasibleFogNode(self, e, g, AppGraph, Substrate, mu):
+        if e[0] in mu:
+            sorted_nodes = sorted([v for v in Substrate.nodes()], key=lambda x: len(self.paths[mu[e[0]]][x]))
+            for v in sorted_nodes:
+                if self.fits(e, mu[e[0]], v, g, Substrate):
+                    return v
+        if e[1] in mu:
+            sorted_nodes = sorted([v for v in Substrate.nodes()], key=lambda x: len(self.paths[mu[e[1]]][x]))
+            for v in sorted_nodes:
+                if self.fits(e, v, mu[e[1]], g, Substrate):
+                    return v
 
     def feasibility(self, AppGraph, Substrate, mu_list):
         mu = mu_list[0]
         mu2 = mu_list[1]
         for node in Substrate.nodes():
             sum_node = 0
-            for anode in AppGraph.nodes():
+            for anode in [u for u in g.nodes() for g in AppGraph]:
                 if mu[anode] == node:
                     sum_node += AppGraph.node[anode]['weight']
             if sum_node > Substrate.node[node]['weight']:
                 return False
         for edge in Substrate.edges():
             sum_edge = 0
-            for aedge in AppGraph.edges(data='weight'):
+            for aedge in [u for u in g.edges(data='weight') for g in AppGraph]:
                 if aedge in mu2 and edge in mu2[aedge]:
                     sum_edge += aedge[2]
             if sum_edge > Substrate[edge[0]][edge[1]]['weight']:
@@ -280,11 +289,17 @@ def main():
     print("test heuristic!")
     for AppGraph in [nx.complete_graph(400), nx.ladder_graph(4), nx.complete_graph(4), ]:
         for Substrate in [nx.ladder_graph(4), nx.complete_graph(4), nx.complete_graph(300)]:
+            c = nx.ladder_graph(4)
             for v in AppGraph.nodes():
                 AppGraph.node[v]['weight'] = 2
             for e in AppGraph.edges():
                 AppGraph[e[0]][e[1]]['weight'] = 2
             AppGraph.node[0]['weight'] = 3
+            for v in c.nodes():
+                c.node[v]['weight'] = 2
+            for e in c.edges():
+                c[e[0]][e[1]]['weight'] = 2
+            c.node[0]['weight'] = 3
             for v in Substrate.nodes():
                 Substrate.node[v]['weight'] = 4
                 Substrate.node[v]['free'] = 4
@@ -292,6 +307,9 @@ def main():
                 Substrate[e[0]][e[1]]['weight'] = 4
                 Substrate[e[0]][e[1]]['free'] = 4
             gba = GreedyBorderAllocationForFogModel(None, None)
-            result = gba.greedyBorderAllocation(AppGraph, Substrate, {})
+            result = gba.greedyBorderAllocation([AppGraph,c], Substrate, {})
             if result != None and not gba.feasibility(AppGraph, Substrate, result):
                 print("problem")
+            print("try next")
+    print("done")
+        
