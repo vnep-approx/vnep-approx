@@ -64,7 +64,7 @@ class GreedyBorderAllocationForFogModel(object):
         # required by the framework, it is designed for gurobi based algos
         self.gurobi_settings = gurobi_settings
         self.paths = {}
-        self.AppGraph, self.Substrate, self.LbNodes = None, None, None
+        self.AppGraphList, self.Substrate, self.LbNodes = None, None, None
         if self.scenario == None:
             return
 
@@ -92,21 +92,20 @@ class GreedyBorderAllocationForFogModel(object):
         for u, v in self.substrate_edge_resources:
             self.Substrate.add_edge(u, v, weight=substrate_alib.edge[(u,v)]["capacity"])
 
-        if len(self.scenario.requests) > 1:
-            raise NotImplementedError("GBA does not support more requests")
-        request_alib = self.scenario.requests[0]
-        self.LbNodes = {}
-        # TODO: make request graphs directed
-        self.AppGraph = nx.Graph()
-        for rnode in request_alib.nodes:
-            self.AppGraph.add_node(rnode, weight=request_alib.get_node_demand(rnode))
-            allowed_nodes = request_alib.get_allowed_nodes(rnode)
-            if allowed_nodes is not None:
-                if len(allowed_nodes) > 1:
-                    raise NotImplementedError("GBA does not support multiple allowed nodes")
-                self.LbNodes[rnode] = allowed_nodes[0]
-        for i, j in request_alib.edges:
-            self.AppGraph.add_edge(i, j, weight=request_alib.get_edge_demand((i,j)))
+        self.AppGraphList = []
+        for request_alib in self.scenario.requests:
+            self.LbNodes = {}
+            AppGraph = nx.DiGraph()
+            for rnode in request_alib.nodes:
+                AppGraph.add_node(rnode, weight=request_alib.get_node_demand(rnode))
+                allowed_nodes = request_alib.get_allowed_nodes(rnode)
+                if allowed_nodes is not None:
+                    if len(allowed_nodes) > 1:
+                        raise NotImplementedError("GBA does not support multiple allowed nodes")
+                    self.LbNodes[rnode] = allowed_nodes[0]
+            for i, j in request_alib.edges:
+                AppGraph.add_edge(i, j, weight=request_alib.get_edge_demand((i, j)))
+            self.AppGraphList.append(AppGraph)
 
     def construct_results_object(self, result, feasible):
         """
@@ -134,17 +133,17 @@ class GreedyBorderAllocationForFogModel(object):
         :return:
         """
         self.start_time = time.time()
-        result = self.greedyBorderAllocation(self.AppGraph, self.Substrate, self.LbNodes)
+        result = self.greedyBorderAllocation(self.AppGraphList, self.Substrate, self.LbNodes)
         if result is not None:
             feasible = True
         else:
             feasible = False
         return self.construct_results_object(result, feasible=feasible)
 
-    # AppGraph: container of networkx graphs with demand as weight attribute
+    # AppGraphList: container of networkx graphs with demand as weight attribute
     # Substrate: networkx graphs with capacity as weight attribute
-    # LocationBound: dictionary AppGraph node to  Substrate Node
-    def greedyBorderAllocation(self, AppGraph, Substrate, LbNodes):
+    # LocationBound: dictionary AppGraphList node to  Substrate Node
+    def greedyBorderAllocation(self, AppGraphList, Substrate, LbNodes):
         for e in Substrate.edges():
             Substrate[e[0]][e[1]]['free'] = Substrate[e[0]][e[1]]['weight']
         for u in Substrate.nodes():
@@ -153,22 +152,25 @@ class GreedyBorderAllocationForFogModel(object):
         #    2: µ ← new Mapping
         #    3: ADDALLLOCATIONBOUND(µ, LbNodes)
         mu = LbNodes
-        #    4: sBE ← SORTEDBORDEREDGES(AppGraph, µ)
+        #    4: sBE ← SORTEDBORDEREDGES(AppGraphList, µ)
         #    5: while ISINCOMPLETE(µ) do
         mu2 = {}
-        num_appgraph_nodes = sum([len(graph.nodes()) for graph in AppGraph])
+        num_appgraph_nodes = sum([len(graph.nodes()) for graph in AppGraphList])
         while len(mu) < num_appgraph_nodes:
             #    6: (a1, a2) ← NEXTEDGE(µ, sBE)
-            (e,g) = self.nextEdge(AppGraph, Substrate, mu)
+            (e,g) = self.nextEdge(AppGraphList, Substrate, mu)
             if e == None:
                 return mu
             #    7: f ← CLOSESTFEASIBLEFOGNODE(a2, µ(a1))
-            f = self.closestFeasibleFogNode(e, g, AppGraph, Substrate, mu)
+            f = self.closestFeasibleFogNode(e, g, AppGraphList, Substrate, mu)
             #    8: if ISDEFINED(f) then
             if f != None:
                 #    9: ADDMAPPING(a2, f)
                 mu[e[1]] = f
-                self.updateSubstrate(e, mu[e[0]], mu[e[1]], g, Substrate, mu, mu2)
+                try:
+                    self.updateSubstrate(e, mu[e[0]], mu[e[1]], g, Substrate, mu, mu2)
+                except KeyError:
+                    pass
             #    10: UPDATEBORDEREDGES(a2)
             #    11: else return 0
             else:
@@ -176,6 +178,7 @@ class GreedyBorderAllocationForFogModel(object):
         #    12: return µ
         return [mu, mu2]
 
+    # TODO: continue consistent renaming from AppGraph to AppGraphList
     def nextEdge(self, AppGraph, substrate, mu):
         #    14: (a1, a2) ← LARGESTEDGE(sBE)
         #    15: if (ISDEFINED(µ(a1)) then return (a1, a2)
@@ -287,19 +290,19 @@ class GreedyBorderAllocationForFogModel(object):
 def main():
     global paths
     print("test heuristic!")
-    for AppGraph in [nx.complete_graph(400), nx.ladder_graph(4), nx.complete_graph(4), ]:
+    for AppGraph1 in [nx.complete_graph(400), nx.ladder_graph(4), nx.complete_graph(4), ]:
         for Substrate in [nx.ladder_graph(4), nx.complete_graph(4), nx.complete_graph(300)]:
-            c = nx.ladder_graph(4)
-            for v in AppGraph.nodes():
-                AppGraph.node[v]['weight'] = 2
-            for e in AppGraph.edges():
-                AppGraph[e[0]][e[1]]['weight'] = 2
-            AppGraph.node[0]['weight'] = 3
-            for v in c.nodes():
-                c.node[v]['weight'] = 2
-            for e in c.edges():
-                c[e[0]][e[1]]['weight'] = 2
-            c.node[0]['weight'] = 3
+            AppGraph2 = nx.ladder_graph(4)
+            for v in AppGraph1.nodes():
+                AppGraph1.node[v]['weight'] = 2
+            for e in AppGraph1.edges():
+                AppGraph1[e[0]][e[1]]['weight'] = 2
+            AppGraph1.node[0]['weight'] = 3
+            for v in AppGraph2.nodes():
+                AppGraph2.node[v]['weight'] = 2
+            for e in AppGraph2.edges():
+                AppGraph2[e[0]][e[1]]['weight'] = 2
+            AppGraph2.node[0]['weight'] = 3
             for v in Substrate.nodes():
                 Substrate.node[v]['weight'] = 4
                 Substrate.node[v]['free'] = 4
@@ -307,8 +310,8 @@ def main():
                 Substrate[e[0]][e[1]]['weight'] = 4
                 Substrate[e[0]][e[1]]['free'] = 4
             gba = GreedyBorderAllocationForFogModel(None, None)
-            result = gba.greedyBorderAllocation([AppGraph,c], Substrate, {})
-            if result != None and not gba.feasibility(AppGraph, Substrate, result):
+            result = gba.greedyBorderAllocation([AppGraph1, AppGraph2], Substrate, {})
+            if result != None and not gba.feasibility(AppGraph1, Substrate, result):
                 print("problem")
             print("try next")
     print("done")
