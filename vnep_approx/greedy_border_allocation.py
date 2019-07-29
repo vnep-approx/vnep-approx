@@ -28,6 +28,30 @@ Created on Thu Jul 25 22:18:58 2019
 """
 
 import networkx as nx
+import time
+
+from alib import solutions, modelcreator
+
+
+class GreedyBorderAllocationResult(modelcreator.AlgorithmResult):
+
+    def __init__(self, scenario, feasible, runtime, cost):
+        self.scenario = scenario
+        self.feasible = feasible
+        self.runtime = runtime
+        self.cost = cost
+        self.alg_key = ("GBA", "0")
+        self.solutions = {self.alg_key: []}
+
+    def get_solution(self):
+        return self.solutions[self.alg_key][0]
+
+    def _get_solution_overview(self):
+        return "GBA solution feasible: {}, cost: {}, runtime: {}".format(self.feasible, self.cost, self.runtime)
+
+    def _cleanup_references_raw(self, original_scenario):
+        self.scenario = original_scenario
+        self.solutions[self.alg_key][0].scenario = original_scenario
 
 
 class GreedyBorderAllocationForFogModel(object):
@@ -82,8 +106,24 @@ class GreedyBorderAllocationForFogModel(object):
         for i, j in request_alib.edges:
             self.AppGraph.add_edge(i, j, weight=request_alib.get_edge_demand((i,j)))
 
-    def construct_results_object(self, node_mapping, link_mapping):
-        pass
+    def construct_results_object(self, result, feasible):
+        """
+        Constructs
+
+        :param result:
+        :param feasible:
+        :return:
+        """
+        if feasible:
+            node_mapping, link_mapping = result
+        # TODO: properly fill Mapping object
+        mapping_alib = solutions.Mapping("GBA-mapping", self.scenario.requests[0], self.scenario.substrate, is_embedded=feasible)
+        runtime = time.time() - self.start_time
+        result_alib = GreedyBorderAllocationResult(self.scenario, feasible, runtime, 10.0)
+        solution_alib = solutions.IntegralScenarioSolution(name="GBA-solution", scenario=self.scenario)
+        solution_alib.add_mapping(self.scenario.requests[0], mapping_alib)
+        result_alib.solutions[result_alib.alg_key].append(solution_alib)
+        return result_alib
 
     def compute_integral_solution(self):
         """
@@ -91,8 +131,13 @@ class GreedyBorderAllocationForFogModel(object):
 
         :return:
         """
-        node_mapping, link_mapping = self.greedyBorderAllocation(self.AppGraph, self.Substrate, self.LbNodes)
-        return self.construct_results_object(node_mapping, link_mapping)
+        self.start_time = time.time()
+        result = self.greedyBorderAllocation(self.AppGraph, self.Substrate, self.LbNodes)
+        if result is not None:
+            feasible = True
+        else:
+            feasible = False
+        return self.construct_results_object(result, feasible=feasible)
 
     # AppGraph, Substrate: networkx graphs with capacity/demand as attributes
     # LocationBound: dictionary AppGraph node to  Substrate Node
