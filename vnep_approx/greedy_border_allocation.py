@@ -130,13 +130,14 @@ class GreedyBorderAllocationForFogModel(object):
         total_cost = 0.0
         if feasible:
             node_mapping, link_mapping = result
-
-        # TODO: properly fill Mapping object
-        mapping_alib = solutions.Mapping("GBA-mapping", self.scenario.requests[0], self.scenario.substrate, is_embedded=feasible)
+        solution_alib = solutions.IntegralScenarioSolution(name="GBA-solution", scenario=self.scenario)
         runtime = time.time() - self.start_time
         result_alib = GreedyBorderAllocationResult(self.scenario, feasible, runtime, total_cost)
-        solution_alib = solutions.IntegralScenarioSolution(name="GBA-solution", scenario=self.scenario)
-        solution_alib.add_mapping(self.scenario.requests[0], mapping_alib)
+        for req in self.scenario.requests:
+            mapping_alib = solutions.Mapping("GBA-mapping-{}".format(req.name), req,
+                                             self.scenario.substrate, is_embedded=feasible)
+            # TODO: properly fill Mapping object
+            solution_alib.add_mapping(req, mapping_alib)
         result_alib.solutions[result_alib.alg_key].append(solution_alib)
         return result_alib
 
@@ -156,7 +157,7 @@ class GreedyBorderAllocationForFogModel(object):
 
     # AppGraphList: container of networkx graphs with demand as weight attribute
     # Substrate: networkx graphs with capacity as weight attribute
-    # LocationBound: dictionary AppGraphList graph to AppGraph node to  Substrate Node
+    # LocationBound: dictionary AppGraph to AppGraph node to  Substrate Node
     def greedyBorderAllocation(self, AppGraphList, Substrate, LbNodes):
         for e in Substrate.edges():
             Substrate[e[0]][e[1]]['free'] = Substrate[e[0]][e[1]]['weight']
@@ -168,9 +169,12 @@ class GreedyBorderAllocationForFogModel(object):
         mu = LbNodes
         #    4: sBE ← SORTEDBORDEREDGES(AppGraphList, µ)
         #    5: while ISINCOMPLETE(µ) do
+        # mu2: dictionary AppGraph to AppGraph edge to  Substrate path
         mu2 = {}
+        for AppGraph in AppGraphList:
+            mu2[AppGraph] = {}
         num_appgraph_nodes = sum([len(graph.nodes()) for graph in AppGraphList])
-        while len(mu) < num_appgraph_nodes:
+        while sum([len(mu[graph]) for graph in AppGraphList]) < num_appgraph_nodes:
             #    6: (a1, a2) ← NEXTEDGE(µ, sBE)
             (e, AppGraph) = self.nextEdge(AppGraphList, Substrate, mu)
             if e == None:
@@ -180,8 +184,11 @@ class GreedyBorderAllocationForFogModel(object):
             #    8: if ISDEFINED(f) then
             if f != None:
                 #    9: ADDMAPPING(a2, f)
-                mu[e[1]] = f
-                self.updateSubstrate(e, mu[e[0]], mu[e[1]], AppGraph, Substrate, mu, mu2)
+                mu[AppGraph][e[1]] = f
+                try:
+                    self.updateSubstrate(e, mu[AppGraph][e[0]], mu[AppGraph][e[1]], AppGraph, Substrate, mu, mu2)
+                except KeyError as err:
+                    pass
             #    10: UPDATEBORDEREDGES(a2)
             #    11: else return 0
             else:
@@ -221,7 +228,7 @@ class GreedyBorderAllocationForFogModel(object):
             if (v == None):
                 return None
             #    18: ADDMAPPING(a1, f)
-            mu[u] = v
+            mu[AppGraph][u] = v
             substrate.node[v]['free'] -= AppGraph.node[u]['weight']
             #    19: UPDATEBORDEREDGES(a1)
             sBE_with_AppGraph = self.sortedBorderEdges(AppGraphList, mu)
@@ -231,29 +238,29 @@ class GreedyBorderAllocationForFogModel(object):
         borderEdges = []
         for AppGraph in AppGraphList:
             for e in AppGraph.edges(data='weight'):
-                if (e[0] in mu and not e[1] in mu):
+                if (e[0] in mu[AppGraph] and not e[1] in mu[AppGraph]):
                     borderEdges.append((e,AppGraph))
-                if (not e[0] in mu and e[1] in mu):
+                if (not e[0] in mu[AppGraph] and e[1] in mu[AppGraph]):
                     borderEdges.append((e,AppGraph))
         return sorted(borderEdges, key=lambda x: x[0][2])
 
     def nextFromDisjointPart(self, AppGraphList, substrate, mu):
         for AppGraph in AppGraphList:
-            not_mapped = set([x for x in AppGraph.nodes() if x not in mu])
+            not_mapped = set([x for x in AppGraph.nodes() if x not in mu[AppGraph]])
             for u in not_mapped:
-                if len(set(AppGraph[u]).intersection(set(mu.keys()))) == 0:
+                if len(set(AppGraph[u]).intersection(set(mu[AppGraph].keys()))) == 0:
                     fit = [v for v in substrate.nodes() if substrate.node[v]['free'] >= AppGraph.node[u]['weight']]
                     if fit == []:
                         return (None, None, None)
                     return (u, AppGraph, fit[0])
         return (None, None, None)
 
-    def fits(self, e, u, v, graph, Substrate):
+    def fits(self, e, u, v, AppGraph, Substrate):
         p = self.paths[u][v]
         for i in range(len(p) - 1):
             if Substrate[p[i]][p[i + 1]]['free'] < e[2]:
                 return False
-        return Substrate.node[v]['free'] >= graph.node[e[1]]['weight']
+        return Substrate.node[v]['free'] >= AppGraph.node[e[1]]['weight']
 
 
     def updateSubstrate(self, e, u, v, AppGraph, Substrate, mu, mu2):
@@ -262,19 +269,19 @@ class GreedyBorderAllocationForFogModel(object):
             p = self.paths[u][v]
             for i in range(len(p) - 1):
                 Substrate[p[i]][p[i + 1]]['free'] -= e[2]
-            mu2[e] = p
+            mu2[AppGraph][e] = p
 
     # e[0] embedded on u, e[1] not yet
     def closestFeasibleFogNode(self, e, AppGraph, Substrate, mu):
-        if e[0] in mu:
-            sorted_nodes = sorted([v for v in Substrate.nodes()], key=lambda x: len(self.paths[mu[e[0]]][x]))
+        if e[0] in mu[AppGraph]:
+            sorted_nodes = sorted([v for v in Substrate.nodes()], key=lambda x: len(self.paths[mu[AppGraph][e[0]]][x]))
             for v in sorted_nodes:
-                if self.fits(e, mu[e[0]], v, AppGraph, Substrate):
+                if self.fits(e, mu[AppGraph][e[0]], v, AppGraph, Substrate):
                     return v
-        if e[1] in mu:
-            sorted_nodes = sorted([v for v in Substrate.nodes()], key=lambda x: len(self.paths[mu[e[1]]][x]))
+        if e[1] in mu[AppGraph]:
+            sorted_nodes = sorted([v for v in Substrate.nodes()], key=lambda x: len(self.paths[mu[AppGraph][e[1]]][x]))
             for v in sorted_nodes:
-                if self.fits(e, v, mu[e[1]], AppGraph, Substrate):
+                if self.fits(e, v, mu[AppGraph][e[1]], AppGraph, Substrate):
                     return v
 
     def feasibility(self, AppGraph, Substrate, mu_list):
