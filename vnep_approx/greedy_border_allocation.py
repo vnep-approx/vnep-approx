@@ -64,18 +64,20 @@ class GreedyBorderAllocationForFogModel(object):
         # required by the framework, it is designed for gurobi based algos
         self.gurobi_settings = gurobi_settings
         self.paths = {}
+        self.app_graph_to_request_alib = {}
         self.AppGraphList, self.Substrate, self.LbNodes = None, None, None
         if self.scenario == None:
             return
 
-        #
         self.substrate_resources = list(self.scenario.substrate.edges)
         self.substrate_edge_resources = list(self.scenario.substrate.edges)
         self.substrate_node_resources = []
-        for ntype in self.scenario.substrate.get_types():
-            for snode in self.scenario.substrate.get_nodes_by_type(ntype):
-                self.substrate_node_resources.append((ntype, snode))
-                self.substrate_resources.append((ntype, snode))
+        if len(self.scenario.substrate.get_types()) > 1:
+            raise NotImplementedError("Only one node type is supported")
+        self.only_ntype = set(self.scenario.substrate.get_types()).pop()
+        for snode in self.scenario.substrate.get_nodes_by_type(self.only_ntype):
+            self.substrate_node_resources.append((self.only_ntype, snode))
+            self.substrate_resources.append((self.only_ntype, snode))
 
     def init_model_creator(self):
         """
@@ -96,6 +98,7 @@ class GreedyBorderAllocationForFogModel(object):
         self.LbNodes = {}
         for request_alib in self.scenario.requests:
             AppGraph = nx.DiGraph()
+            self.app_graph_to_request_alib[AppGraph] = request_alib
             self.LbNodes[AppGraph] = {}
             for rnode in request_alib.nodes:
                 AppGraph.add_node(rnode, weight=request_alib.get_node_demand(rnode))
@@ -116,9 +119,22 @@ class GreedyBorderAllocationForFogModel(object):
         :param link_mapping:
         :return:
         """
-        for nf in node_mapping:
-            subs_node = node_mapping[nf]
-            
+        total_cost = 0.0
+        # Node names are exactly the same in both graphs
+        for AppGraph in self.AppGraphList:
+            req = self.app_graph_to_request_alib[AppGraph]
+            for rnode in node_mapping[AppGraph]:
+                snode = node_mapping[AppGraph][rnode]
+                total_cost += req.get_node_demand(rnode) * self.scenario.substrate.get_node_type_cost(snode, self.only_ntype)
+            for redge in link_mapping[AppGraph]:
+                spath = link_mapping[AppGraph][redge]
+                total_path_unit_cost = 0.0
+                for i in range(len(spath) - 1):
+                    sedge = (spath[i], spath[i + 1])
+                    total_path_unit_cost += self.scenario.substrate.get_edge_cost(sedge)
+                total_cost += redge[2] * total_path_unit_cost
+        return total_cost
+
     def construct_results_object(self, result, feasible):
         """
         Constructs
@@ -130,6 +146,7 @@ class GreedyBorderAllocationForFogModel(object):
         total_cost = 0.0
         if feasible:
             node_mapping, link_mapping = result
+            total_cost = self.calculate_solution_cost(node_mapping, link_mapping)
         solution_alib = solutions.IntegralScenarioSolution(name="GBA-solution", scenario=self.scenario)
         runtime = time.time() - self.start_time
         result_alib = GreedyBorderAllocationResult(self.scenario, feasible, runtime, total_cost)
@@ -150,10 +167,11 @@ class GreedyBorderAllocationForFogModel(object):
         self.start_time = time.time()
         result = self.greedyBorderAllocation(self.AppGraphList, self.Substrate, self.LbNodes)
         if result is not None:
+            node_mapping, link_mapping = result
             feasible = True
         else:
             feasible = False
-        return self.construct_results_object(result, feasible=feasible)
+        return self.construct_results_object(result, feasible=True)
 
     # AppGraphList: container of networkx graphs with demand as weight attribute
     # Substrate: networkx graphs with capacity as weight attribute
@@ -170,31 +188,28 @@ class GreedyBorderAllocationForFogModel(object):
         #    4: sBE ← SORTEDBORDEREDGES(AppGraphList, µ)
         #    5: while ISINCOMPLETE(µ) do
         # mu2: dictionary AppGraph to AppGraph edge to  Substrate path
-        mu2 = {}
+        self.mu2 = {}
         for AppGraph in AppGraphList:
-            mu2[AppGraph] = {}
+            self.mu2[AppGraph] = {}
         num_appgraph_nodes = sum([len(graph.nodes()) for graph in AppGraphList])
         while sum([len(mu[graph]) for graph in AppGraphList]) < num_appgraph_nodes:
             #    6: (a1, a2) ← NEXTEDGE(µ, sBE)
             (e, AppGraph) = self.nextEdge(AppGraphList, Substrate, mu)
             if e == None:
-                return mu
+                return None
             #    7: f ← CLOSESTFEASIBLEFOGNODE(a2, µ(a1))
             f = self.closestFeasibleFogNode(e, AppGraph, Substrate, mu)
             #    8: if ISDEFINED(f) then
             if f != None:
                 #    9: ADDMAPPING(a2, f)
                 mu[AppGraph][e[1]] = f
-                try:
-                    self.updateSubstrate(e, mu[AppGraph][e[0]], mu[AppGraph][e[1]], AppGraph, Substrate, mu, mu2)
-                except KeyError as err:
-                    pass
+                self.updateSubstrate(e, mu[AppGraph][e[0]], mu[AppGraph][e[1]], AppGraph, Substrate)
             #    10: UPDATEBORDEREDGES(a2)
             #    11: else return 0
             else:
                 return None
         #    12: return µ
-        return [mu, mu2]
+        return [mu, self.mu2]
 
     def nextEdge(self, AppGraphList, substrate, mu):
         #    14: (a1, a2) ← LARGESTEDGE(sBE)
@@ -223,13 +238,13 @@ class GreedyBorderAllocationForFogModel(object):
         #    16: (a1, f) ← NEXTFROMDISJOINTPART(µ)
         sBE_with_AppGraph = self.sortedBorderEdges(AppGraphList, mu)
         while sBE_with_AppGraph == []:
-            (u, AppGraph, v) = self.nextFromDisjointPart(AppGraphList, substrate, mu)
+            (i, AppGraph, v) = self.nextFromDisjointPart(AppGraphList, substrate, mu)
             #    17: if ISDEFINED(f) then
             if (v == None):
-                return None
+                return None, None
             #    18: ADDMAPPING(a1, f)
-            mu[AppGraph][u] = v
-            substrate.node[v]['free'] -= AppGraph.node[u]['weight']
+            mu[AppGraph][i] = v
+            substrate.node[v]['free'] -= AppGraph.node[i]['weight']
             #    19: UPDATEBORDEREDGES(a1)
             sBE_with_AppGraph = self.sortedBorderEdges(AppGraphList, mu)
         return sBE_with_AppGraph[-1]
@@ -238,21 +253,21 @@ class GreedyBorderAllocationForFogModel(object):
         borderEdges = []
         for AppGraph in AppGraphList:
             for e in AppGraph.edges(data='weight'):
-                if (e[0] in mu[AppGraph] and not e[1] in mu[AppGraph]):
+                # border edges are unmapped edges with not mapped end
+                if (e[0] in mu[AppGraph] and not e[1] in mu[AppGraph] and e not in self.mu2):
                     borderEdges.append((e,AppGraph))
-                if (not e[0] in mu[AppGraph] and e[1] in mu[AppGraph]):
-                    borderEdges.append((e,AppGraph))
+                # TODO: paralleld edges are not mapped this way!!! -- but this is not supported by the framework either!
         return sorted(borderEdges, key=lambda x: x[0][2])
 
     def nextFromDisjointPart(self, AppGraphList, substrate, mu):
         for AppGraph in AppGraphList:
             not_mapped = set([x for x in AppGraph.nodes() if x not in mu[AppGraph]])
-            for u in not_mapped:
-                if len(set(AppGraph[u]).intersection(set(mu[AppGraph].keys()))) == 0:
-                    fit = [v for v in substrate.nodes() if substrate.node[v]['free'] >= AppGraph.node[u]['weight']]
+            for i in not_mapped:
+                if len(set(AppGraph[i]).intersection(set(mu[AppGraph].keys()))) == 0:
+                    fit = [v for v in substrate.nodes() if substrate.node[v]['free'] >= AppGraph.node[i]['weight']]
                     if fit == []:
                         return (None, None, None)
-                    return (u, AppGraph, fit[0])
+                    return (i, AppGraph, fit[0])
         return (None, None, None)
 
     def fits(self, e, u, v, AppGraph, Substrate):
@@ -263,13 +278,15 @@ class GreedyBorderAllocationForFogModel(object):
         return Substrate.node[v]['free'] >= AppGraph.node[e[1]]['weight']
 
 
-    def updateSubstrate(self, e, u, v, AppGraph, Substrate, mu, mu2):
+    def updateSubstrate(self, e, u, v, AppGraph, Substrate):
         Substrate.node[v]['free'] -= AppGraph.node[e[1]]['weight']
         if u != v:
             p = self.paths[u][v]
             for i in range(len(p) - 1):
                 Substrate[p[i]][p[i + 1]]['free'] -= e[2]
-            mu2[AppGraph][e] = p
+            self.mu2[AppGraph][e] = p
+        else:
+            self.mu2[AppGraph][e] = []
 
     # e[0] embedded on u, e[1] not yet
     def closestFeasibleFogNode(self, e, AppGraph, Substrate, mu):
@@ -278,11 +295,8 @@ class GreedyBorderAllocationForFogModel(object):
             for v in sorted_nodes:
                 if self.fits(e, mu[AppGraph][e[0]], v, AppGraph, Substrate):
                     return v
-        if e[1] in mu[AppGraph]:
-            sorted_nodes = sorted([v for v in Substrate.nodes()], key=lambda x: len(self.paths[mu[AppGraph][e[1]]][x]))
-            for v in sorted_nodes:
-                if self.fits(e, v, mu[AppGraph][e[1]], AppGraph, Substrate):
-                    return v
+        else:
+            raise NotImplementedError("Unmapped edge tail, this should NOT happen in the directed GBA")
 
     def feasibility(self, AppGraph, Substrate, mu_list):
         mu = mu_list[0]
