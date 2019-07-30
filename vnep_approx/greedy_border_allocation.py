@@ -105,7 +105,8 @@ class GreedyBorderAllocationForFogModel(object):
                 allowed_nodes = request_alib.get_allowed_nodes(rnode)
                 if allowed_nodes is not None:
                     if len(allowed_nodes) > 1:
-                        raise NotImplementedError("GBA does not support multiple allowed nodes")
+                        self.logger.warn("GBA does not support multiple allowed nodes... "
+                                         "Relaxing placement constraint of node {} with allowed nodes {}".format(rnode, allowed_nodes))
                     self.LbNodes[AppGraph][rnode] = allowed_nodes[0]
             for i, j in request_alib.edges:
                 AppGraph.add_edge(i, j, weight=request_alib.get_edge_demand((i, j)))
