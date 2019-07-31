@@ -211,23 +211,24 @@ class RandRoundSepLPOptDynVMPCollectionForFogModel(twm.RandRoundSepLPOptDynVMPCo
         :param allocations_of_sinlge_valid_mapping:
         :return:
         """
-
-        self.logger.debug("COST COMPUTATION IN FOG.PY")
         sum_cost_of_valid_mapping = 0.0
-
         for sres, alloc in allocations_of_sinlge_valid_mapping.iteritems():
-            self.logger.debug("handling {} {}".format(sres, alloc))
             res_cost = None
             if type(sres) is tuple and self.universal_node_type not in sres:
                 res_cost = self.substrate.edge[sres]['cost']
-            elif type(sres) is str:
-                res_cost = self.substrate.node[sres]['cost'][self.universal_node_type]
+            elif type(sres) is tuple and self.universal_node_type in sres:
+                node_type, node_id = sres
+                res_cost = self.substrate.node[node_id]['cost'][node_type]
+            elif type(sres) is int and sres in self.substrate.node:
+                # checking the last possible key types of allocations
+                continue
+
+            # now at this point we always must have the resource cost set
             if res_cost is not None:
-                self.logger.debug("\tadding {} to cost based on resource cost {} for resource".format(res_cost * alloc, res_cost, sres))
                 sum_cost_of_valid_mapping += res_cost * alloc
             else:
-                self.logger.debug("\tLOOKS BAD: NOT ADDING COST FOR RESOURCE {}".format(sres))
-
+                raise ValueError("Resource cost is not found for resource {} with allocation {}".
+                                 format(sres, alloc))
         return sum_cost_of_valid_mapping
 
     def get_first_mappings_for_requests(self):
