@@ -2749,13 +2749,10 @@ class RandRoundSepLPOptDynVMPCollection(object):
         :param allocations:
         :return:
         """
-
-        self.logger.debug("COST COMPUTATION IN TW.PY")
         if self.calculate_cost_of_integral_solutions:
             substrate = scenario_solution.scenario.substrate
             total_cost = 0.0
             for sres, alloc in allocations.iteritems():
-                self.logger.debug("handling {} {}".format(sres, alloc))
                 if sres[0] in substrate.types:
                     ntype, node_id = sres
                     res_cost = substrate.node[node_id]['cost'][ntype]
@@ -2763,7 +2760,6 @@ class RandRoundSepLPOptDynVMPCollection(object):
                     res_cost = substrate.edge[sres]['cost']
                 else:
                     raise ValueError("Unexpected allocations format!")
-                self.logger.debug("adding {} to cost based on resource cost {} for resource {}".format(res_cost * alloc, res_cost, sres))
                 total_cost += res_cost * alloc
             return total_cost
         else:
