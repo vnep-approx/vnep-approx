@@ -211,15 +211,23 @@ class RandRoundSepLPOptDynVMPCollectionForFogModel(twm.RandRoundSepLPOptDynVMPCo
         :param allocations_of_sinlge_valid_mapping:
         :return:
         """
+
+        self.logger.debug("COST COMPUTATION IN FOG.PY")
         sum_cost_of_valid_mapping = 0.0
+
         for sres, alloc in allocations_of_sinlge_valid_mapping.iteritems():
+            self.logger.debug("handling {} {}".format(sres, alloc))
             res_cost = None
             if type(sres) is tuple and self.universal_node_type not in sres:
                 res_cost = self.substrate.edge[sres]['cost']
             elif type(sres) is str:
                 res_cost = self.substrate.node[sres]['cost'][self.universal_node_type]
             if res_cost is not None:
+                self.logger.debug("\tadding {} to cost based on resource cost {} for resource".format(res_cost * alloc, res_cost, sres))
                 sum_cost_of_valid_mapping += res_cost * alloc
+            else:
+                self.logger.debug("\tLOOKS BAD: NOT ADDING COST FOR RESOURCE {}".format(sres))
+
         return sum_cost_of_valid_mapping
 
     def get_first_mappings_for_requests(self):
@@ -437,7 +445,7 @@ class RandRoundSepLPOptDynVMPCollectionForFogModel(twm.RandRoundSepLPOptDynVMPCo
         filtered_mappings_of_requests = {req: list() for req in self.requests}
         for req in self.requests:
             # we have to ensure this value is not zero, otherwise 0 cost optimal solutions are filtered
-            weighted_average_cost_of_req = 0.00001
+            weighted_average_cost_of_req = 0    #MATTHIAS REMARK: no need for value larger 0 in my opinion
             for mapping_index, mapping in enumerate(self.mappings_of_requests[req]):
                 allocations_of_sinlge_valid_mapping = self._compute_allocations(req, mapping)
                 total_cost_of_mapping = self.calculate_total_cost_of_single_valid_mapping(allocations_of_sinlge_valid_mapping)
@@ -450,7 +458,7 @@ class RandRoundSepLPOptDynVMPCollectionForFogModel(twm.RandRoundSepLPOptDynVMPCo
                 # according to experiments current implementation is memory intensive, rather recalculate it than store it
                 allocations_of_sinlge_valid_mapping = self._compute_allocations(req, mapping)
                 total_cost_of_mapping = self.calculate_total_cost_of_single_valid_mapping(allocations_of_sinlge_valid_mapping)
-                if total_cost_of_mapping < self.rounding_solution_quality * weighted_average_cost_of_req:
+                if total_cost_of_mapping <= self.rounding_solution_quality * weighted_average_cost_of_req:              #MATTHIAS REMARK: CHANGED FROM < TO <=
                     # the gurobi variable is not needed, just its value
                     filtered_mappings_of_requests[req].append((self.mapping_variables[req][mapping_index].X, mapping_index, mapping))
             if len(filtered_mappings_of_requests[req]) > 0:
