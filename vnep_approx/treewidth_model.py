@@ -498,13 +498,12 @@ class ValidMappingRestrictionComputer(object):
     def get_number_of_different_edge_sets(self):
         return self.number_of_different_edge_sets
 
+# begin
 
-
-class ShortestValidPathsComputerWithoutLatencies(object):
+class ShortestValidPathsComputer_NoLatencies(object):
 
     ''' This class is optimized to compute all shortest paths in the substrate quickly for varying valid edge sets.
     '''
-
     def __init__(self, substrate, request, valid_mapping_restriction_computer, edge_costs):
         self.substrate = substrate
         self.request = request
@@ -527,14 +526,8 @@ class ShortestValidPathsComputerWithoutLatencies(object):
         self._compute_valid_edge_mapping_costs()
 
     def recompute_with_new_costs(self, new_edge_costs):
-        # self.edge_costs = new_edge_costs
-
-        for key, value in new_edge_costs.iteritems():
-            if value < 0:
-                print "ERROR: value < 0, {}:  {}".format(key, value)
-                self.edge_costs[key] = -value
-            else:
-                self.edge_costs[key] = value
+        for sedge, cost in new_edge_costs.iteritems():
+            self.edge_costs[sedge] = abs(cost)
 
         self.compute()
 
@@ -607,67 +600,59 @@ class ShortestValidPathsComputerWithoutLatencies(object):
             self.valid_sedge_pred[request_edge] = self.valid_sedge_pred[edge_set_id_to_edge_set]
 
 
+    """ Getter functions for retrieving calculation results """
+    def get_valid_sedge_costs_for_reqedge(self, request_edge, mapping_edge):
+        return self.valid_sedge_costs[request_edge][mapping_edge]
 
-class ShortestValidPathsComputerLORENZ(object):
+    def get_valid_sedge_costs_from_edgesetindex(self, edge_set_index, reqedge):
+        return self.valid_sedge_costs[edge_set_index][reqedge]
 
-    ''' This class is optimized used to check correctness of the optimized lorenz class;
-        they should produce the same output
-    '''
+    def get_valid_sedge_path(self, request_edge, source_mapping, target_mapping):
+        reqedge_predecessors = self.valid_sedge_pred[request_edge][source_mapping]
+        u = target_mapping
+        path = []
+        while u != source_mapping:
+            pred = reqedge_predecessors[u]
+            path.append((pred, u))
+            u = pred
+        path = list(reversed(path))
+        return path
+
+
+class ShortestValidPathsComputer(object):
+
+    Approx_NoLatencies = 0
+    Approx_Flex = 1
+    Approx_Strict = 2
+    Approx_Exact = 3
+
+    @staticmethod
+    def createSVPC(approx_type, substrate, valid_mapping_restriction_computer, edge_costs, edge_latencies=None, epsilon=None, limit=None):
+        if approx_type == ShortestValidPathsComputer.Approx_Flex:
+            return ShortestValidPathsComputer_Flex		(substrate, valid_mapping_restriction_computer, edge_costs, edge_latencies, epsilon, limit)
+        if approx_type == ShortestValidPathsComputer.Approx_Strict:
+            return ShortestValidPathsComputer_Strict	(substrate, valid_mapping_restriction_computer, edge_costs, edge_latencies, epsilon, limit)
+        if approx_type == ShortestValidPathsComputer.Approx_Exact:
+            return ShortestValidPathsComputer_Exact     (substrate, valid_mapping_restriction_computer, edge_costs, edge_latencies, epsilon, limit)
+
+        return ShortestValidPathsComputer_NoLatencies	(substrate, None, valid_mapping_restriction_computer, edge_costs)
+
 
     def __init__(self, substrate, valid_mapping_restriction_computer, edge_costs, edge_latencies, epsilon, limit):
         self.substrate = substrate
         self.valid_mapping_restriction_computer = valid_mapping_restriction_computer
         self.edge_costs = edge_costs
         self.edge_latencies = edge_latencies
-        # self.edge_latencies = {sedge: max(lat, -lat) for sedge, lat in edge_latencies.iteritems()}
         self.epsilon = epsilon
         self.limit = limit
-        self.edge_mapping_invalidities = False
         self.latency_limit_overstepped = False
-        self.FAIL = (None, np.nan, np.nan)
-
-        for sedge, lat in edge_latencies:
-            if lat < 0:
-                print "ERROR!! lat < 0:  ", lat
-                self.edge_latencies[sedge] = -lat
-
-        for sedge, lat in edge_costs:
-            if lat < 0:
-                print "ERROR!! cost < 0:  ", lat
-                self.edge_costs[sedge] = -lat
-
-
-    def compute(self):
-        self.number_of_nodes = len(self.substrate.nodes)
-        self.predecessor = np.full(self.number_of_nodes, -1, dtype=np.int32)
-        self.temp_latencies = np.full(self.number_of_nodes, np.inf, dtype=np.float64)
-        self.node_infeasible = np.full(self.number_of_nodes, False, dtype=np.bool)
-        self.node_nums = []
-
-        self.edge_set_id_to_edge_set = self.valid_mapping_restriction_computer.get_edge_set_mapping()
-        self.number_of_valid_edge_sets = self.valid_mapping_restriction_computer.get_number_of_different_edge_sets()
-        self.valid_sedge_costs = {id: {} for id in range(self.number_of_valid_edge_sets)}
-        # self.valid_sedge_latencies = {id: {} for id in range(self.number_of_valid_edge_sets)}
-        self.valid_sedge_paths = {id: {} for id in range(self.number_of_valid_edge_sets)}
-
+        self.edge_mapping_invalidities = False
 
         self._prepare_numeric_graph()
-        self._compute_all_pairs()
-
-    def recompute_with_new_costs(self, new_edge_costs):
-        # self.edge_costs = new_edge_costs
-
-        for sedge, cost in new_edge_costs.iteritems():
-
-            if cost < 0:
-                print "WARNING: cost < 0 in recompute.  ", cost
-
-            self.edge_costs[sedge] = max(cost, -cost)
-
-        self.compute()
+        self._init_datastructures()
 
     def _prepare_numeric_graph(self):
-        #prepare and store information on "numeric graph"
+        # prepare and store information on "numeric graph"
         self.number_of_nodes = 0
         self.num_id_to_snode_id = []
         self.snode_id_to_num_id = {}
@@ -677,10 +662,64 @@ class ShortestValidPathsComputerLORENZ(object):
             self.snode_id_to_num_id[snode] = self.number_of_nodes
             self.number_of_nodes += 1
 
+    def _init_datastructures(self):
+        """ this method exists to separate the allocation of datastructures from their re-initialization """
+        self.temp_latencies = np.full(self.number_of_nodes, -1, dtype=np.float64)
+        self.node_infeasible = np.full(self.number_of_nodes, False, dtype=np.bool)
+        self.distances = np.full((self.number_of_nodes, 32 + 1), np.inf, dtype=np.float64)
+        # self.preds = np.full((self.number_of_nodes, 32 + 1), -1, dtype=np.int32)
+        # self.predecessors = np.full(self.number_of_nodes, -1, np.int32)
+
+        self.edge_set_id_to_edge_set = 0
+        self.number_of_valid_edge_sets = 0
+        self.valid_sedge_costs = dict()
+        self.valid_sedge_paths = dict()
+
+        # self.edge_set_id_to_edge_set = self.valid_mapping_restriction_computer.get_edge_set_mapping()
+        # self.number_of_valid_edge_sets = self.valid_mapping_restriction_computer.get_number_of_different_edge_sets()
+        # self.valid_sedge_costs = dict(zip(range(self.number_of_valid_edge_sets), [{}] * self.number_of_valid_edge_sets))
+        # self.valid_sedge_paths = dict(zip(range(self.number_of_valid_edge_sets), [{}] * self.number_of_valid_edge_sets))
+
+
+    def compute(self):
+        # reset values
+        self.temp_latencies.fill(-1)
+        self.node_infeasible.fill(False)
+        # self.distances.fill(np.inf)
+        # self.preds.fill(-1)
+        # self.predecessors.fill(-1)
+
+        self.edge_set_id_to_edge_set = self.valid_mapping_restriction_computer.get_edge_set_mapping()
+        self.number_of_valid_edge_sets = self.valid_mapping_restriction_computer.get_number_of_different_edge_sets()
+
+
+        for edgesetindex in range(self.number_of_valid_edge_sets):
+            self.valid_sedge_costs[edgesetindex] = {}
+            self.valid_sedge_paths[edgesetindex] = {}
+
+        if self.number_of_valid_edge_sets == 0:
+            print "ERROR: no valid edges"
+            return
+
+        # if self.number_of_valid_edge_sets == 1 and self.edge_set_id_to_edge_set[0] == self.substrate.edges:
+        #     print "Only using all edges !"
+
+        self._compute_all_pairs()
+
+    def recompute_with_new_costs(self, new_edge_costs):
+        for sedge, cost in new_edge_costs.iteritems():
+            self.edge_costs[sedge] = abs(cost)
+
+        self.compute()
+
+    def _prepare_valid_edges(self, edge_set_index):
+        self.current_valid_edge_set = self.edge_set_id_to_edge_set[edge_set_index]
+        self.sedge_valid = {}
+        for e in self.current_valid_edge_set:
+            self.sedge_valid[e] = True
 
     # one run of dijkstra using delay metric to root out infeasible nodes
     def _preprocess(self, num_source_node):
-
         queue = [(0, num_source_node)]
         self.temp_latencies.fill(np.inf)
         self.temp_latencies[num_source_node] = 0
@@ -690,7 +729,7 @@ class ShortestValidPathsComputerLORENZ(object):
             total_latencies, num_current_node = heappop(queue)
 
             for sedge in self.substrate.out_edges[self.num_id_to_snode_id[num_current_node]]:
-                if sedge in self.current_valid_edge_set:
+                if self.sedge_valid.get(sedge, False):
                     num_endpoint = self.snode_id_to_num_id[sedge[1]]
                     lat = self.edge_latencies[sedge]
                     if total_latencies + lat < self.temp_latencies[num_endpoint]:
@@ -699,61 +738,242 @@ class ShortestValidPathsComputerLORENZ(object):
 
         self.node_nums = []
         self.num_feasible_nodes = 0
+        self.edge_mapping_invalidities = False
         for num_node in range(self.number_of_nodes):
             if self.temp_latencies[num_node] > self.limit:
                 self.node_infeasible[num_node] = True
+                self.edge_mapping_invalidities = True
             else:
                 self.node_nums.append(num_node)
                 self.num_feasible_nodes += 1
 
+    def _compute_all_pairs(self):
+        raise RuntimeError("Abstract Method")
+
+
+    """ Getter functions for retrieving calculation results """
+    def get_valid_sedge_costs_for_reqedge(self, request_edge, mapping_edge):
+        request_edge_to_edge_set_id = self.valid_mapping_restriction_computer.get_reqedge_to_edgeset_id_mapping()
+        edge_set_id_to_edge_set = request_edge_to_edge_set_id[request_edge]
+        return self.get_valid_sedge_costs_from_edgesetindex(edge_set_id_to_edge_set, mapping_edge)
+
+    def get_valid_sedge_costs_from_edgesetindex(self, edge_set_index, mapping):
+        return self.valid_sedge_costs[edge_set_index].get(mapping, np.nan)
+
+    def get_valid_sedge_path(self, request_edge, source_mapping, target_mapping):
+        request_edge_to_edge_set_id = self.valid_mapping_restriction_computer.get_reqedge_to_edgeset_id_mapping()
+        edge_set_id = request_edge_to_edge_set_id[request_edge]
+        return self.valid_sedge_paths[edge_set_id][source_mapping].get(target_mapping, None)
+
+
+class ShortestValidPathsComputer_Flex(ShortestValidPathsComputer):
+    def __init__(self, substrate, valid_mapping_restriction_computer, edge_costs, edge_latencies, epsilon, limit):
+        super(ShortestValidPathsComputer_Flex, self).__init__(substrate, valid_mapping_restriction_computer,
+                                                              edge_costs, edge_latencies, epsilon, limit)
+
+        self.preds = np.full((self.number_of_nodes, 32 + 1), -1, dtype=np.int32)
+        self.distances = np.full((self.number_of_nodes, 32 + 1), np.inf, dtype=np.float64)
+        self.tau_modified_latencies = dict(zip(self.substrate.edges, [0] * len(self.substrate.edges)))
+
+    def _handle_zero_delay_links(self, num_source_node, t):
+        queue = [num_source_node]
+        steps = 0
+
+        while queue and steps < len(self.substrate.edges):  # len(nodes) !?
+            num_current_node = queue.pop()
+            steps += 1
+
+            for sedge in self.substrate.out_edges[self.num_id_to_snode_id[num_current_node]]:
+                if self.sedge_valid.get(sedge, False) \
+                        and self.tau_modified_latencies[sedge] == 0:
+                    num_endpoint = self.snode_id_to_num_id[sedge[1]]
+                    if not self.node_infeasible[num_endpoint]:
+                        val = self.distances[num_current_node][t] + self.edge_costs[sedge]
+                        if self.distances[num_endpoint][t] > val:
+                            self.distances[num_endpoint][t] = val
+                            self.preds[num_endpoint][t] = num_current_node
+                            queue.append(num_endpoint)
+
+    def _DAD(self, num_source_node, tau):
+        if tau + 1 > np.shape(self.distances)[1]:
+            self.distances = np.full((self.number_of_nodes, tau + 1), np.inf, dtype=np.float64)
+            self.preds = np.full((self.number_of_nodes, tau + 1), -1, dtype=np.int32)
+        else:
+            self.distances.fill(np.inf)
+            self.preds.fill(-1)
+
+        self.distances[num_source_node][0] = 0
+        self.preds[num_source_node][0] = num_source_node
+
+        self._handle_zero_delay_links(num_source_node, 0)
+
+        for t in range(1, tau + 1):
+            for num_current_node in self.node_nums:
+
+                self.distances[num_current_node][t] = self.distances[num_current_node][t - 1]
+                self.preds[num_current_node][t] = self.preds[num_current_node][t - 1]
+
+                for sedge in self.substrate.in_edges[self.num_id_to_snode_id[num_current_node]]:
+                    if self.sedge_valid.get(sedge, False):
+                        latency = self.tau_modified_latencies[sedge]
+                        if latency <= t:
+                            num_in_neighbor = self.snode_id_to_num_id[sedge[0]]
+                            val = self.distances[num_in_neighbor][t - latency] + self.edge_costs[sedge]
+                            if val < self.distances[num_current_node][t]:
+                                self.distances[num_current_node][t] = val
+                                self.preds[num_current_node][t] = num_in_neighbor
+
+            for num_current_node in self.node_nums:
+                self._handle_zero_delay_links(num_current_node, t)
+
+    def _approx_latencies(self, num_source_node):
+        self._preprocess(num_source_node)
+
+        tau = 3  # int(self.limit) / 100 + 1 # max(int(math.log(self.limit) / 2), 1)
+
+        self.paths = {i: None for i in range(self.number_of_nodes)}
+        self.paths[num_source_node] = []
+
+        approx_holds = False
+
+        closed_nodes = np.copy(self.node_infeasible)
+        closed_nodes[num_source_node] = True
+
+        while not approx_holds:
+
+            # print " ---------------- tau:  ", tau, "\t\t -----------------"
+
+            # tau_modified_latencies = {}
+            for key, value in self.edge_latencies.iteritems():
+                val = int((value * tau) / self.limit)
+                self.tau_modified_latencies[key] = val
+
+            self._DAD(num_source_node, tau)
+
+            approx_holds = True
+
+            for num_target_node in self.node_nums:
+
+                if closed_nodes[num_target_node]:
+                    continue
+
+                if tau / 2 > self.number_of_nodes / self.epsilon:
+                    print "ERROR: too many iterations"
+
+                if self.preds[num_target_node][tau] == -1:
+                    approx_holds = False
+                    tau *= 2
+                    break
+
+                path = []
+                added_latencies = 0
+                n = num_target_node
+                t = tau
+                while n != num_source_node:
+                    pred = self.preds[n][t]
+                    sedge = self.num_id_to_snode_id[pred], self.num_id_to_snode_id[n]
+                    path.append(sedge)
+                    added_latencies += self.edge_latencies[sedge]
+                    t -= tau_modified_latencies[sedge]
+                    n = pred
+                path = list(reversed(path))
+
+                if not approx_holds or added_latencies > (1 + self.epsilon) * self.limit:
+                    tau *= 2
+                    break
+
+                # approximation good enough, save result
+                self.temp_latencies[num_target_node] = added_latencies
+                self.paths[num_target_node] = path
+                closed_nodes[num_target_node] = True
+
+        return tau - 1
+
+    def _compute_all_pairs(self):
+        for edge_set_index in range(self.number_of_valid_edge_sets):
+
+            self._prepare_valid_edges(edge_set_index)
+
+            # print "  edgeset ", edge_set_index
+
+            for num_source_node in range(self.number_of_nodes):
+
+                # print "    starting from ", num_source_node
+
+                converted_path_dict = {}
+                source_snode = self.num_id_to_snode_id[num_source_node]
+
+                final_tau = self._approx_latencies(num_source_node)
+
+                for num_target_node in self.node_nums:
+
+                    target_snode = self.num_id_to_snode_id[num_target_node]
+                    costs = self.distances[num_target_node][final_tau]
+                    self.valid_sedge_costs[edge_set_index][(source_snode, target_snode)] = costs
+
+                    if np.isnan(costs):
+                        print "shouldnt happen"
+                    elif self.temp_latencies[num_target_node] > self.limit:
+                        self.latency_limit_overstepped = True
+
+                    converted_path_dict[target_snode] = self.paths[num_target_node]
+
+                self.valid_sedge_paths[edge_set_index][source_snode] = converted_path_dict
+
+
+class ShortestValidPathsComputer_Strict(ShortestValidPathsComputer):
+    def __init__(self, substrate, valid_mapping_restriction_computer, edge_costs, edge_latencies, epsilon, limit):
+        super(ShortestValidPathsComputer_Strict, self).__init__(substrate, valid_mapping_restriction_computer,
+                                                                edge_costs, edge_latencies, epsilon, limit)
+
+        self.FAIL = (None, np.nan)
+        self.predecessors = np.full(self.number_of_nodes, -1, dtype=np.int32)
+        self.distances = np.full((self.number_of_nodes, 1000), np.inf)
 
     def _SPPP(self, lower, upper, eps, num_source_node, num_target_node):
         S = float(lower * eps) / (self.num_feasible_nodes + 1)
 
-        c_tilde = {}
-        min_c_tilde = np.inf
-        for e in self.current_valid_edge_set:
-            val = int(float(self.edge_costs[e]) / S) + 1
-            c_tilde[e] = val
-            if val < min_c_tilde:
-                min_c_tilde = val
+        rescaled_costs = dict(zip(self.current_valid_edge_set, map(lambda x: int(float(self.edge_costs[x]) / S) + 1, self.current_valid_edge_set)))
 
         U_tilde = int(upper / S) + self.num_feasible_nodes + 1
 
-        distances = np.full((self.number_of_nodes, U_tilde+1), np.inf)
-        distances[num_source_node][0] = 0
-        self.predecessor[num_source_node] = num_source_node
+        if U_tilde + 1 >= np.shape(self.distances)[1]:
+            self.distances = np.full((self.number_of_nodes, U_tilde + 1), np.inf, dtype=np.float64)
+        else:
+            self.distances.fill(np.inf)
 
-        for i in range(min_c_tilde, U_tilde+1):
+        self.distances[num_source_node][0] = 0
+        self.predecessors[num_source_node] = num_source_node
+
+        for i in range(1, U_tilde+1):
             for n in self.node_nums:
-                distances[n][i] = distances[n][i-1]
+                self.distances[n][i] = self.distances[n][i-1]
 
                 for e in self.substrate.in_edges[self.num_id_to_snode_id[n]]:
-                    if e in self.current_valid_edge_set and c_tilde[e] <= i:
+                    if self.sedge_valid.get(e, False) and rescaled_costs[e] <= i:
                         u, _ = e
-                        comp_val = self.edge_latencies[e] + distances[self.snode_id_to_num_id[u]][i - c_tilde[e]]
+                        comp_val = self.edge_latencies[e] + self.distances[self.snode_id_to_num_id[u]][i - rescaled_costs[e]]
 
-                        if comp_val < distances[n][i]:
-                            distances[n][i] = comp_val
-                            self.predecessor[n] = self.snode_id_to_num_id[u]
+                        if comp_val < self.distances[n][i]:
+                            self.distances[n][i] = comp_val
+                            self.predecessors[n] = self.snode_id_to_num_id[u]
 
-            if distances[num_target_node][i] <= self.limit:
+            if self.distances[num_target_node][i] <= self.limit:
                 # retrace path from t to s
                 n = num_target_node
                 path = []
                 total_costs = 0
                 while n != num_source_node:
-                    pred = self.predecessor[n]
+                    pred = self.predecessors[n]
                     sedge = self.num_id_to_snode_id[pred], self.num_id_to_snode_id[n]
                     path.append(sedge)
                     total_costs += self.edge_costs[sedge]
                     n = pred
                 path = list(reversed(path))
 
-                return path, distances[num_target_node][i], total_costs
+                return path, total_costs
 
         return self.FAIL
-
 
     def _Hassin(self, lower, upper, num_source_node, num_target_node):
         b_low = lower
@@ -788,7 +1008,7 @@ class ShortestValidPathsComputerLORENZ(object):
                 break
 
             for sedge in self.substrate.out_edges[self.num_id_to_snode_id[num_current_node]]:
-                if sedge in self.current_valid_edge_set:
+                if self.sedge_valid.get(sedge, False): # sedge in self.current_valid_edge_set:
                     num_endpoint = self.snode_id_to_num_id[sedge[1]]
                     cost = self.edge_costs[sedge]
                     lat = self.edge_latencies[sedge]
@@ -810,7 +1030,7 @@ class ShortestValidPathsComputerLORENZ(object):
                 total_costs += self.edge_costs[sedge]
                 n = pred
             path = list(reversed(path))
-            return path, self.temp_latencies[num_target_node], total_costs
+            return path, total_costs
         else:
             return self.temp_latencies[num_target_node]
 
@@ -818,13 +1038,14 @@ class ShortestValidPathsComputerLORENZ(object):
     def _approx_latencies(self, num_source_node, num_target_node):
 
         if num_source_node == num_target_node:
-            return [], 0, 0
+            return [], 0
 
         low, high = -1, len(self.edge_levels_sorted)-1
 
         while low < high - 1:
             j = int((low + high) / 2)
-            if self._shortest_path_latencies_limited(self.edge_levels_sorted[j], num_source_node, num_target_node) < self.limit:
+            if self._shortest_path_latencies_limited(self.edge_levels_sorted[j], num_source_node,
+                                                     num_target_node) < self.limit:
                 high = j
             else:
                 low = j
@@ -842,291 +1063,111 @@ class ShortestValidPathsComputerLORENZ(object):
 
         for edge_set_index in range(self.number_of_valid_edge_sets):
 
-            #TODO: move to preprocessing
-            self.current_valid_edge_set = self.edge_set_id_to_edge_set[edge_set_index]
+            self._prepare_valid_edges(edge_set_index)
             self.edge_levels_sorted = self._sort_edges_distinct()
 
             for num_source_node in range(self.number_of_nodes):
 
-                # print "starting from ", num_source_node
+                # print "  starting from ", num_source_node
                 self._preprocess(num_source_node)
+                # print self.substrate.get_number_of_nodes(), self.substrate.get_number_of_edges()
+                # print self.num_feasible_nodes, len(self.current_valid_edge_set)
 
                 converted_path_dict = {}
 
-                for num_target_node in range(self.number_of_nodes):
+                for num_target_node in self.node_nums:
 
-                    if len(self.current_valid_edge_set) == 0\
-                            or num_target_node not in self.node_nums:
-                        path, lat, costs = self.FAIL
-                    else:
-                        self.predecessor.fill(-1)
-                        path, lat, costs = self._approx_latencies(num_source_node, num_target_node)
+                    path, costs = self._approx_latencies(num_source_node, num_target_node)
 
                     self.valid_sedge_costs[edge_set_index][(self.num_id_to_snode_id[num_source_node], self.num_id_to_snode_id[num_target_node])] = costs
-                    # self.valid_sedge_latencies[edge_set_index][(self.num_id_to_snode_id[num_source_node], self.num_id_to_snode_id[num_target_node])] = lat
-
-                    if costs == np.nan:
-                        self.edge_mapping_invalidities = True
-                    elif lat > self.limit:
-                        self.latency_limit_overstepped = True
-                        print "WARNING: Latency limit overstepped by {} from {} to {}".format(lat - self.limit, self.num_id_to_snode_id[num_source_node], self.num_id_to_snode_id[num_target_node])
-
                     converted_path_dict[self.num_id_to_snode_id[num_target_node]] = path
 
                 self.valid_sedge_paths[edge_set_index][self.num_id_to_snode_id[num_source_node]] = converted_path_dict
 
 
-    def get_valid_sedge_costs_for_reqedge(self, request_edge, mapping_edge):
-        request_edge_to_edge_set_id = self.valid_mapping_restriction_computer.get_reqedge_to_edgeset_id_mapping()
-        edge_set_id_to_edge_set = request_edge_to_edge_set_id[request_edge]
-        return self.get_valid_sedge_costs_from_edgesetindex(edge_set_id_to_edge_set, mapping_edge)
-
-    def get_valid_sedge_costs_from_edgesetindex(self, edge_set_index, reqedge):
-        return self.valid_sedge_costs[edge_set_index].get(reqedge, np.nan)
-
-    def get_valid_sedge_path(self, request_edge, source_mapping, target_mapping):
-        request_edge_to_edge_set_id = self.valid_mapping_restriction_computer.get_reqedge_to_edgeset_id_mapping()
-        edge_set_id_to_edge_set = request_edge_to_edge_set_id[request_edge]
-        return self.valid_sedge_paths[edge_set_id_to_edge_set][source_mapping].get(target_mapping, None)
-
-
-class ShortestValidPathsComputer(object):
-    ''' This class is optimized to compute all shortest paths in the substrate quickly for varying valid edge sets while
-        approximately keeping the per-edge-latencies below a given limit.
-    '''
-
+class ShortestValidPathsComputer_Exact(ShortestValidPathsComputer):
     def __init__(self, substrate, valid_mapping_restriction_computer, edge_costs, edge_latencies, epsilon, limit):
-        self.substrate = substrate
-        self.valid_mapping_restriction_computer = valid_mapping_restriction_computer
-        self.edge_costs = edge_costs
-        self.edge_latencies = edge_latencies
-        self.epsilon = epsilon
-        self.limit = limit
-        self.edge_mapping_invalidities = False
-        self.latency_limit_overstepped = False
-
-    def compute(self):
-        self.number_of_nodes = len(self.substrate.nodes)
-        self.temp_latencies = np.full(self.number_of_nodes, -1, dtype=np.float64)
-        self.node_infeasible = np.full(self.number_of_nodes, False, dtype=np.bool)
-        self.distances = np.full((self.number_of_nodes, 32 + 1), np.inf, dtype=np.float64)
-        self.preds = np.full((self.number_of_nodes, 32 + 1), -1, dtype=np.int32)
-
-        self.edge_set_id_to_edge_set = self.valid_mapping_restriction_computer.get_edge_set_mapping()
-        self.number_of_valid_edge_sets = self.valid_mapping_restriction_computer.get_number_of_different_edge_sets()
-        self.valid_sedge_costs = {id: {} for id in range(self.number_of_valid_edge_sets)}
-        self.valid_sedge_paths = {id: {} for id in range(self.number_of_valid_edge_sets)}
-
-        self._prepare_numeric_graph()
-        self._compute_all_pairs()
-
-    def recompute_with_new_costs(self, new_edge_costs):
-        self.edge_costs = new_edge_costs
-        self.compute()
-
-    def _prepare_numeric_graph(self):
-        # prepare and store information on "numeric graph"
-        self.number_of_nodes = 0
-        self.num_id_to_snode_id = []
-        self.snode_id_to_num_id = {}
-
-        for snode in self.substrate.nodes:
-            self.num_id_to_snode_id.append(snode)
-            self.snode_id_to_num_id[snode] = self.number_of_nodes
-            self.number_of_nodes += 1
+        super(ShortestValidPathsComputer_Exact, self).__init__(substrate, valid_mapping_restriction_computer,
+                                                              edge_costs, edge_latencies, epsilon, limit)
 
 
-    def _prepare_valid_edges(self, edge_set_index):
-        self.current_valid_edge_set = self.edge_set_id_to_edge_set[edge_set_index]
-        self.sedge_valid = {}
-        for e in self.current_valid_edge_set:
-            self.sedge_valid[e] = True
+    def _recursive_find_paths(self, current_node, target_node, visited, localPathList):
+        """ Has exponential worst-case running time """
 
-    def _handle_zero_delay_links(self, num_source_node, tau_modified_latencies, t):
-        queue = [num_source_node]
+        visited[current_node] = True
 
-        while queue:
-            num_current_node = queue.pop()
+        if current_node == target_node:
+            yield localPathList
 
-            for sedge in self.substrate.out_edges[self.num_id_to_snode_id[num_current_node]]:
-                if self.sedge_valid.get(sedge, False) \
-                        and tau_modified_latencies[sedge] == 0:
-                    num_endpoint = self.snode_id_to_num_id[sedge[1]]
-                    if not self.node_infeasible[num_endpoint]:
-                        val = self.distances[num_current_node][t] + self.edge_costs[sedge]
-                        if self.distances[num_endpoint][t] > val:
-                            self.distances[num_endpoint][t] = val
-                            self.preds[num_endpoint][t] = num_current_node
-                            queue.append(num_endpoint)
+        for sedge in self.substrate.out_edges[self.num_id_to_snode_id[current_node]]:
 
-    def _DAD(self, num_source_node, tau, tau_modified_latencies):
+            if sedge not in self.current_valid_edge_set:
+                continue
 
-        if tau + 1 > np.shape(self.distances)[1]:
-            self.distances = np.full((self.number_of_nodes, tau + 1), np.inf, dtype=np.float64)
-            self.preds = np.full((self.number_of_nodes, tau + 1), -1, dtype=np.int32)
+            neighbor = self.snode_id_to_num_id[sedge[1]]
+            if not visited[neighbor]:
+                localPathList.append(sedge)
+                for path in self._recursive_find_paths(neighbor, target_node, visited, localPathList):
+                    yield path
+                localPathList.remove(sedge)
+
+        visited[current_node] = False
+
+
+    def _approx_latencies(self, num_source_node, num_target_node):
+        visited = np.full(self.number_of_nodes, False, np.bool)
+        pathList = []
+        lowestCosts = np.nan
+        cheapestPath = []
+
+        for path in self._recursive_find_paths(num_source_node, num_target_node, visited, pathList):
+
+            if not path:
+                continue
+
+            total_latencies, total_costs = 0, 0
+
+            for edge in path:
+                total_latencies += self.edge_latencies[edge]
+                total_costs += self.edge_costs[edge]
+
+            if total_latencies <= self.limit:
+                # path is feasible
+
+                if not cheapestPath or total_costs < lowestCosts:
+                    cheapestPath = list(path)
+                    lowestCosts = total_costs
+
+        if np.isnan(lowestCosts):
+            return None, np.nan
         else:
-            self.distances.fill(np.inf)
-            self.preds.fill(-1)
+            return cheapestPath, lowestCosts
 
-        self.distances[num_source_node][0] = 0
-        self.preds[num_source_node][0] = num_source_node
-
-        self._handle_zero_delay_links(num_source_node, tau_modified_latencies, 0)
-
-        for t in range(1, tau + 1):
-            if t > 1:
-                for num_start_node in self.node_nums:
-                    self._handle_zero_delay_links(num_start_node, tau_modified_latencies, t - 1)
-
-            for num_current_node in self.node_nums:
-
-                self.distances[num_current_node][t] = self.distances[num_current_node][t - 1]
-                self.preds[num_current_node][t] = self.preds[num_current_node][t - 1]
-
-                for sedge in self.substrate.in_edges[self.num_id_to_snode_id[num_current_node]]:
-                    if self.sedge_valid.get(sedge, False):
-                        latency = tau_modified_latencies[sedge]
-                        if latency <= t:
-                            num_in_neighbor = self.snode_id_to_num_id[sedge[0]]
-                            val = self.distances[num_in_neighbor][t - latency] + self.edge_costs[sedge]
-                            if val < self.distances[num_current_node][t]:
-                                self.distances[num_current_node][t] = val
-                                self.preds[num_current_node][t] = num_in_neighbor
-
-
-    # one run of dijkstra using delay metric to root out infeasible nodes
-    def _preprocess(self, num_source_node):
-
-        queue = [(0, num_source_node)]
-        self.temp_latencies.fill(np.inf)
-        self.temp_latencies[num_source_node] = 0
-        self.node_infeasible.fill(False)
-
-        while queue:
-            total_latencies, num_current_node = heappop(queue)
-
-            for sedge in self.substrate.out_edges[self.num_id_to_snode_id[num_current_node]]:
-                if self.sedge_valid.get(sedge, False):
-                    num_endpoint = self.snode_id_to_num_id[sedge[1]]
-                    lat = self.edge_latencies[sedge]
-                    if total_latencies + lat < self.temp_latencies[num_endpoint]:
-                        self.temp_latencies[num_endpoint] = total_latencies + lat
-                        heappush(queue, (total_latencies + lat, num_endpoint))
-
-        self.node_nums = []
-        self.num_feasible_nodes = 0
-        for num_node in range(self.number_of_nodes):
-            if self.temp_latencies[num_node] > self.limit:
-                self.node_infeasible[num_node] = True
-            else:
-                self.node_nums.append(num_node)
-                self.num_feasible_nodes += 1
-
-
-    def _approx_latencies(self, num_source_node):
-
-        self._preprocess(num_source_node)
-
-        tau = 3  # int(self.limit) / 100 + 1 # max(int(math.log(self.limit) / 2), 1)
-
-        self.paths = {i: None for i in range(self.number_of_nodes)}
-        self.paths[num_source_node] = []
-
-        approx_holds = False
-
-        closed_nodes = np.copy(self.node_infeasible)
-        closed_nodes[num_source_node] = True
-
-        while not approx_holds:
-
-            tau_modified_latencies = {}
-            for key, value in self.edge_latencies.items():
-                val = int((value * tau) / self.limit)
-                tau_modified_latencies[key] = val
-
-            self._DAD(num_source_node, tau, tau_modified_latencies)
-
-            approx_holds = True
-
-            for num_target_node in self.node_nums:
-
-                if closed_nodes[num_target_node]:
-                    continue
-
-                if self.preds[num_target_node][tau] == -1:
-                    approx_holds = False
-                    tau *= 2
-                    break
-
-                path = []
-                added_latencies = 0
-                n = num_target_node
-                t = tau
-                while n != num_source_node:
-                    pred = self.preds[n][t]
-                    sedge = self.num_id_to_snode_id[pred], self.num_id_to_snode_id[n]
-                    path.append(sedge)
-                    added_latencies += self.edge_latencies[sedge]
-                    t -= tau_modified_latencies[sedge]
-                    n = pred
-                path = list(reversed(path))
-
-                if added_latencies > (1 + self.epsilon) * self.limit:
-                    approx_holds = False
-                    # print "end"
-
-                if not approx_holds:
-                    tau *= 2
-                    break
-
-                # approximation good enough, save result
-                self.temp_latencies[num_target_node] = added_latencies
-                self.paths[num_target_node] = path
-                closed_nodes[num_target_node] = True
-
-        return tau - 1
 
     def _compute_all_pairs(self):
-
         for edge_set_index in range(self.number_of_valid_edge_sets):
 
-            self._prepare_valid_edges(edge_set_index)
+            self.current_valid_edge_set = self.edge_set_id_to_edge_set[edge_set_index]
 
             for num_source_node in range(self.number_of_nodes):
 
                 converted_path_dict = {}
-                source_snode = self.num_id_to_snode_id[num_source_node]
 
-                final_tau = self._approx_latencies(num_source_node)
+                for num_target_node in range(self.number_of_nodes):
 
-                for num_target_node in self.node_nums:
+                    if num_source_node == num_target_node:
+                        converted_path_dict[self.num_id_to_snode_id[num_target_node]] = []
+                        self.valid_sedge_costs[edge_set_index][(self.num_id_to_snode_id[num_source_node], self.num_id_to_snode_id[num_target_node])] = 0
 
-                    target_snode = self.num_id_to_snode_id[num_target_node]
-                    costs = self.distances[num_target_node][final_tau]
-                    self.valid_sedge_costs[edge_set_index][(source_snode, target_snode)] = costs
+                    path, costs = self._approx_latencies(num_source_node, num_target_node)
 
-                    if np.isnan(costs):
-                        self.edge_mapping_invalidities = True
-                        print "shouldnt happen"
-                    elif self.temp_latencies[num_target_node] > self.limit:
-                        self.latency_limit_overstepped = True
+                    if not np.isnan(costs):
 
-                    converted_path_dict[target_snode] = self.paths[num_target_node]
+                        self.valid_sedge_costs[edge_set_index][(self.num_id_to_snode_id[num_source_node], self.num_id_to_snode_id[num_target_node])] = costs
 
-                self.valid_sedge_paths[edge_set_index][source_snode] = converted_path_dict
+                        converted_path_dict[self.num_id_to_snode_id[num_target_node]] = path
 
-    def get_valid_sedge_costs_for_reqedge(self, request_edge, mapping_edge):
-        request_edge_to_edge_set_id = self.valid_mapping_restriction_computer.get_reqedge_to_edgeset_id_mapping()
-        edge_set_id_to_edge_set = request_edge_to_edge_set_id[request_edge]
-        return self.get_valid_sedge_costs_from_edgesetindex(edge_set_id_to_edge_set, mapping_edge)
-
-    def get_valid_sedge_costs_from_edgesetindex(self, edge_set_index, reqedge):
-        return self.valid_sedge_costs[edge_set_index].get(reqedge, np.nan)
-
-    def get_valid_sedge_path(self, request_edge, source_mapping, target_mapping):
-        request_edge_to_edge_set_id = self.valid_mapping_restriction_computer.get_reqedge_to_edgeset_id_mapping()
-        edge_set_id_to_edge_set = request_edge_to_edge_set_id[request_edge]
-        return self.valid_sedge_paths[edge_set_id_to_edge_set][source_mapping].get(target_mapping, None)
+                self.valid_sedge_paths[edge_set_index][self.num_id_to_snode_id[num_source_node]] = converted_path_dict
 
 
 
@@ -1550,7 +1591,7 @@ class OptimizedDynVMP(object):
         tasks are to be found in the implementation of the OptimizedDynVMPNode class.
     '''
 
-    def __init__(self, substrate, request, ssntda, initial_snode_costs=None, initial_sedge_costs=None, epsilon=1, limit=1):
+    def __init__(self, substrate, request, ssntda, initial_snode_costs=None, initial_sedge_costs=None, epsilon=1, limit=1, lat_approx_type='no latencies'):
         self.substrate = substrate
         self.request = request
         if not isinstance(ssntda, SmallSemiNiceTDArb):
@@ -1560,13 +1601,36 @@ class OptimizedDynVMP(object):
         self._initialize_costs(initial_snode_costs, initial_sedge_costs)
 
         self.vmrc = ValidMappingRestrictionComputer(substrate=substrate, request=request)
-        self.svpc = ShortestValidPathsComputer(substrate, self.vmrc, self.sedge_costs, self.sedge_latencies, epsilon, limit)
 
-            # (substrate=substrate, request=None, valid_mapping_restriction_computer=self.vmrc,
-            #                                    edge_costs=self.sedge_costs)#, edge_latencies=self.sedge_latencies,
-                                               # epsilon=epsilon, limit=limit)
+        approx_str_to_type = {
+            'no latencies': ShortestValidPathsComputer.Approx_NoLatencies,
+            'flex': ShortestValidPathsComputer.Approx_Flex,
+            'strict': ShortestValidPathsComputer.Approx_Strict,
+            'exact': ShortestValidPathsComputer.Approx_Exact
+        }
 
-        self.counter = [20, 26]
+        self.svpc = ShortestValidPathsComputer.createSVPC(approx_str_to_type[lat_approx_type],
+                                                          substrate,
+                                                          self.vmrc,
+                                                          self.sedge_costs,
+                                                          self.sedge_latencies,
+                                                          epsilon,
+                                                          limit)
+
+        self.lat_approx_type = lat_approx_type
+
+        # if lat_approx_type == 'flex':
+        #     self.svpc = ShortestValidPathsComputer(substrate, self.vmrc, self.sedge_costs, self.sedge_latencies, epsilon, limit)
+        #     # print "Using SVPC Goel"
+        # elif lat_approx_type == 'strict':
+        #     self.svpc = ShortestValidPathsComputerLORENZ(substrate, self.vmrc, self.sedge_costs, self.sedge_latencies, epsilon, limit)
+        #     # print "Using SVPC Lorenz"
+        # else:
+        #     self.svpc = ShortestValidPathsComputerWithoutLatencies(substrate=substrate, request=None,
+        #                                                        valid_mapping_restriction_computer=self.vmrc,
+        #                                                        edge_costs=self.sedge_costs)
+            # print "Using SVPC Dijkstra - no latencies considered"
+
 
     def _initialize_costs(self, snode_costs, sedge_costs):
         if snode_costs is None:
@@ -1594,7 +1658,9 @@ class OptimizedDynVMP(object):
     def initialize_data_structures(self):
         self.vmrc.compute()
 
-        print ("\t\t\t\t\t\t\t\t" if os.getpid()%2==0 else ""), "finding shortest paths for {}".format(self.request.name)
+        print ("\t\t\t\t\t\t\t\t" if os.getpid()%2==0 else ""), "finding shortest paths for {}".format(self.request.name), \
+                ("\t\t\t\t\t\t\t\t" if os.getpid() % 2 == 1 else ""), "\t\t\t{}".format(self.lat_approx_type)
+
 
         # with open("pickles/before/{}_mappings_{}.p".format(self.request.name, os.getpid()%2), "wb") as f:
         #     pickle.dump(self.svpc, f, protocol=pickle.HIGHEST_PROTOCOL)
@@ -1803,6 +1869,15 @@ class OptimizedDynVMP(object):
     def reinitialize(self, new_node_costs, new_edge_costs):
 
         self._initialize_costs(new_node_costs, new_edge_costs)
+        #
+        # print "reinitializing request ", self.request.name
+        #
+        # if self.request.name == "vnet_6":
+        #     with open('pickles/svpc_bug2.p', 'wb') as handle:
+        #         pickle.dump(self.svpc, handle, protocol=pickle.HIGHEST_PROTOCOL)
+        #     print "pickle saved"
+        #     # exit(1)
+
         self.svpc.recompute_with_new_costs(new_edge_costs)
         self._initialize_cost_arrays()
 
@@ -1846,7 +1921,7 @@ class TreeDecompositionComputation(object):
             raise ValueError("PACE_TD_ALGORITHM_PATH environment variable is not set!")
         os.chdir(PACE_TD_ALGORITHM_PATH)
         try:
-            p = subprocess.Popen("./tw-exact", stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+            p = subprocess.Popen("./tw-exact", shell=True, stdin=subprocess.PIPE, stdout=subprocess.PIPE)
             stdoutdata, stderrdata = None, None
             try:
                 stdoutdata, stderrdata = p.communicate(input=td_alg_input, timeout=self.timeout)
@@ -2544,6 +2619,7 @@ class RandRoundSepLPOptDynVMPCollection(object):
                  number_further_mappings_to_add,
                  latency_approximation_factor=1,
                  latency_approximation_limit=1,
+                 latency_approximation_type=None,
                  gurobi_settings=None,
                  logger=None,
                  ):
@@ -2562,7 +2638,7 @@ class RandRoundSepLPOptDynVMPCollection(object):
 
         self.latency_approximation_factor = latency_approximation_factor
         self.latency_approximation_limit = latency_approximation_limit # * total_latencies
-
+        self.latency_approximation_type = latency_approximation_type if latency_approximation_type is not None else 'no latencies'
 
 
         self.rounding_order_list = []
@@ -2686,7 +2762,8 @@ class RandRoundSepLPOptDynVMPCollection(object):
                                          initial_sedge_costs=self.dual_costs_edge_resources,
                                          # edge_latencies=self.edge_latencies, handled in DynVP
                                          epsilon=self.latency_approximation_factor,
-                                         limit=self.latency_approximation_limit
+                                         limit=self.latency_approximation_limit,
+                                         lat_approx_type=self.latency_approximation_type
                                          )
             opt_dynvmp.initialize_data_structures()
             self.dynvmp_runtimes_initialization[req].append(time.time()-dynvmp_init_time)

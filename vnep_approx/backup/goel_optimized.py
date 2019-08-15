@@ -55,9 +55,11 @@ class ShortestValidPathsComputer(object):
 
     def _handle_zero_delay_links(self, num_source_node, tau_modified_latencies, t):
         queue = [num_source_node]
+        steps = 0
 
         while queue:
             num_current_node = queue.pop()
+            steps += 1
 
             for sedge in self.substrate.out_edges[self.num_id_to_snode_id[num_current_node]]:
                 if self.sedge_valid.get(sedge, False) \
@@ -128,6 +130,7 @@ class ShortestValidPathsComputer(object):
         for num_node in range(self.number_of_nodes):
             if self.temp_latencies[num_node] > self.limit:
                 self.node_infeasible[num_node] = True
+                self.edge_mapping_invalidities = True
             else:
                 self.node_nums.append(num_node)
                 self.num_feasible_nodes += 1
@@ -147,7 +150,9 @@ class ShortestValidPathsComputer(object):
         closed_nodes = np.copy(self.node_infeasible)
         closed_nodes[num_source_node] = True
 
-        while not approx_holds:
+        while not approx_holds:  # and tau < 200:
+
+            print " ---------------- tau:  ", tau, "\t\t -----------------"
 
             tau_modified_latencies = {}
             for key, value in self.edge_latencies.items():
@@ -162,6 +167,9 @@ class ShortestValidPathsComputer(object):
 
                 if closed_nodes[num_target_node]:
                     continue
+
+                if tau / 2 > self.number_of_nodes / self.epsilon:
+                    print "ERROR: too many iterations"
 
                 if self.preds[num_target_node][tau] == -1:
                     approx_holds = False
@@ -194,7 +202,7 @@ class ShortestValidPathsComputer(object):
                 self.paths[num_target_node] = path
                 closed_nodes[num_target_node] = True
 
-        return tau - 1
+        return  tau - 1 #if approx_holds else tau/2 - 1
 
     def _compute_all_pairs(self):
 
@@ -216,8 +224,7 @@ class ShortestValidPathsComputer(object):
                     self.valid_sedge_costs[edge_set_index][(source_snode, target_snode)] = costs
 
                     if np.isnan(costs):
-                        self.edge_mapping_invalidities = True
-                        print "this shouldnt happen"
+                        print "shouldnt happen"
                     elif self.temp_latencies[num_target_node] > self.limit:
                         self.latency_limit_overstepped = True
 

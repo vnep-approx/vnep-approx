@@ -127,6 +127,7 @@ class ShortestValidPathsComputer(object):
         for num_node in range(self.number_of_nodes):
             if self.temp_latencies[num_node] > self.limit:
                 self.node_infeasible[num_node] = True
+                self.edge_mapping_invalidities = True
             else:
                 self.node_nums.append(num_node)
                 self.num_feasible_nodes += 1
@@ -138,7 +139,8 @@ class ShortestValidPathsComputer(object):
 
         tau = 3  # int(self.limit) / 100 + 1 # max(int(math.log(self.limit) / 2), 1)
 
-        self.paths = {self.snode_id_to_num_id[snode]: None for snode in self.substrate.nodes}
+        self.paths = {i: None for i in range(self.number_of_nodes)}
+        self.paths[num_source_node] = []
 
         approx_holds = False
 
@@ -146,6 +148,8 @@ class ShortestValidPathsComputer(object):
         closed_nodes[num_source_node] = True
 
         while not approx_holds:
+
+            # print " --------- tau:  ", tau , "\t ----------"
 
             tau_modified_latencies = {}
             for key, value in self.edge_latencies.items():

@@ -1,5 +1,5 @@
 SCENARIO_INPUT_PICKLE: "sample_scenarios.pickle"
-RESULT_OUTPUT_PICKLE:  "sample_scenarios_results_with_latencies.pickle"
+RESULT_OUTPUT_PICKLE:  "with_latencies_results.pickle"
 
 RUN_PARAMETERS:
     - ALGORITHM:

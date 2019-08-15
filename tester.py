@@ -8,12 +8,14 @@ from test.treewidth_model.test_data.substrate_test_data import create_test_subst
 from test.treewidth_model.test_data.request_test_data import example_requests, create_test_request
 from vnep_approx.treewidth_model import ValidMappingRestrictionComputer
 # from vnep_approx.treewidth_model import ShortestValidPathsComputer as SVPC_goel
-from vnep_approx.treewidth_model import ShortestValidPathsComputerWithoutLatencies as SVPC_given
+from vnep_approx.treewidth_model import ShortestValidPathsComputer_NoLatencies as SVPC_given
 from vnep_approx.backup.lorenz import ShortestValidPathsComputerLORENZ as SVPC_Lorenz
 from vnep_approx.backup.lorenz_optimized import ShortestValidPathsComputerLORENZ as SVPC_LORENZ_OPT
 
 from vnep_approx.backup.goel_optimized import ShortestValidPathsComputer as SVPC_goel_OPT
 from vnep_approx.backup.goel import ShortestValidPathsComputer as SVPC_goel
+
+from vnep_approx.backup.SVPC_all import ShortestValidPathsComputer as SVPC_all
 
 # from vnep_approx.deferred.extendedgraph import ExtendedGraph
 # from vnep_approx.deferred.extended_graph_visualizer import ExtendedGraphVisualizer
@@ -421,25 +423,28 @@ def inpsect_pickles():
 
     svpc = None
 
-    with open('latency_study/pickles/before/vnet_2_mappings_0.p', 'rb') as handle:
+    with open('latency_study/pickles/svpc_bug2.p', 'rb') as handle:
         before = pickle.load(handle)
 
-    with open('latency_study/pickles/after/vnet_2_mappings_0.p', 'rb') as handle:
-        after = pickle.load(handle)
+    with open('latency_study/pickles/new_costs.p', 'rb') as handle:
+        new_costs = pickle.load(handle)
+
+    # with open('latency_study/pickles/after/vnet_2_mappings_0.p', 'rb') as handle:
+    #     after = pickle.load(handle)
 
     print "loaded"
 
-    before.valid_mapping_restriction_computer.compute()
+    # before.valid_mapping_restriction_computer.compute()
 
-    before.limit = 10
-    before.epsilon = 1
+    # before.limit = 10
+    # before.epsilon = 1
 
     # for key,value in before.edge_latencies.iteritems():
     #     if value == 0:
     #         before.edge_latencies[key] = 0.1
 
     start_time = time.time()
-    before.compute()
+    before.recompute_with_new_costs(new_costs)
     print "time: ", time.time() - start_time
     print "done"
 
@@ -508,86 +513,126 @@ def check_optimization_lorenz():
 
 
 
-def check_optimization_goel(num_reps=15, substrate=None):
-
-    # limit, epsilon = 20, 0.00001
-    #
-    # with open('latency_study/pickles/before/vnet_1_mappings_0.p', 'rb') as handle:
-    #     svpc = pickle.load(handle)
-    #
-    # goel =      SVPC_goel       (svpc.substrate, svpc.valid_mapping_restriction_computer, svpc.edge_costs, svpc.edge_latencies, epsilon, limit)
-    # optimized = SVPC_goel_OPT   (svpc.substrate, svpc.valid_mapping_restriction_computer, svpc.edge_costs, svpc.edge_latencies, epsilon, limit)
-    # plain =     SVPC_given      (svpc.substrate, None, svpc.valid_mapping_restriction_computer, svpc.edge_costs)
+def check_optimization_goel():
 
 
-    limit, epsilon = 15, 0.00001
-    substrate = create_large_substrate(40, 1)
+    """ setup variables """
+    limit               = 7000 # 3500
+    epsilon             = 0.1
+    number_nodes        = 60
+    edge_res_factor     = 1
+
+    variance            = 100
+    mean                = 1000
+    num_reps            = 20
+
+
+    """ create graphs """
+    substrate = create_large_substrate(number_nodes, edge_res_factor)
+    # substrate, edge_costs, edge_latencies = construct_sptp_substrate()
+
     request = create_large_request(0, substrate, "dragon 3")
 
     lat_pars = {"min_value": 50, "max_value": 400}
     cost_pars = {"min_value": 50, "max_value": 400}
-    edge_costs = {e: get_cost(cost_pars) / 200 for e in substrate.edges}
-    edge_latencies = {e: get_latency(lat_pars) / 200 for e in substrate.edges}
+
+    # edge_costs = {e: float(get_cost(cost_pars)) / 200888 * 10e5 for e in substrate.edges}
+    # edge_latencies = {e: int(float(get_latency(lat_pars)) / 200856 * 10e5) for e in substrate.edges}
+
+    edge_costs      = dict(zip(substrate.edges, np.random.normal(mean, variance, substrate.get_number_of_edges())))
+    edge_latencies  = dict(zip(substrate.edges, np.random.normal(mean, variance, substrate.get_number_of_edges())))
+
+    for key, val in edge_costs.iteritems():
+        if val < 0:
+            edge_costs[key] = - val
+
+    for key, val in edge_latencies.iteritems():
+        if val < 0:
+            edge_latencies[key] = - val
+
+    s = ""
+    for v in edge_latencies.values(): # [get_latency(lat_pars) for _ in range(len(substrate.edges))]: #edge_latencies.values():
+        s += str(v) + ", "
+
+    print s[:-2]
+    print np.std(edge_latencies.values())
+    # exit()
+
+
+    print edge_latencies
 
     vmrc = ValidMappingRestrictionComputer(substrate, request)
     vmrc.compute()
 
+    svpc_args = [substrate, vmrc, edge_costs, edge_latencies, epsilon, limit]
 
-    goel =      SVPC_goel       (substrate, vmrc, edge_costs, edge_latencies, epsilon, limit)
-    optimized = SVPC_goel_OPT   (substrate, vmrc, edge_costs, edge_latencies, epsilon, limit)
-    plain =     SVPC_given      (substrate, None, vmrc, edge_costs)
+    # goel =          SVPC_goel       (substrate, vmrc, edge_costs, edge_latencies, epsilon, limit)
+    # goel_opt =      SVPC_goel_OPT   (substrate, vmrc, edge_costs, edge_latencies, epsilon, limit)
+    lorenz_opt =    SVPC_LORENZ_OPT     (*svpc_args)
+    # plain =         SVPC_given      (substrate, None, vmrc, edge_costs)
+
+    goel    = SVPC_all.createSVPC(SVPC_all.Approx_Flex,         *svpc_args)
+    lorenz  = SVPC_all.createSVPC(SVPC_all.Approx_Strict,       *svpc_args)
+    plain   = SVPC_all.createSVPC(SVPC_all.Approx_NoLatencies,  *svpc_args)
+    exact   = SVPC_all.createSVPC(SVPC_all.Approx_Exact,        *svpc_args)
+
+
+
+    """ set candidates """
+
+    candidates = [goel, plain]
+
+
+    names = {goel: "GOEL\t", lorenz: "LORENZ\t", plain: "PLAIN  ", lorenz_opt: "LORENT_OPT", exact: "EXACT:\t"}
+    times = [list() for _ in range(len(candidates))]
 
 
     print "setup substrate on ", substrate.get_number_of_nodes()\
                                  , " nodes and ", substrate.get_number_of_edges(), " edges"
 
-    # ---------------------         170 s           ---------------
-
-    total_goel, total_opt = 0, 0
-    time_plain = 0
+    # ------------------------------------
 
     for i in range(num_reps):
         print " - - - - - - - - - - - - - - - - -"
-        start_time = time.time()
-        goel.compute()
-        time_goel = time.time() - start_time
-        total_goel += time_goel
-        print "time GOEL:\t\t ", time_goel
-        #
-        #
-        # with open('pickles/lorenz.p', 'wb') as handle:
-        #     pickle.dump(lorenz, handle, protocol=pickle.HIGHEST_PROTOCOL)
-
-        start_time = time.time()
-        optimized.compute()
-        time_optimized = time.time() - start_time
-        total_opt += time_optimized
-        print "time OPTIMIZED:\t ", time_optimized
-
-
-        start_time = time.time()
-        plain.compute()
-        time_plain = time.time() - start_time
-        print "time PLAIN:\t\t ", time.time() - start_time
+        for ix, cand in enumerate(candidates):
+            start_time = time.time()
+            cand.compute()
+            time_needed = time.time() - start_time
+            times[ix].append(time_needed)
+            print "time " + names[cand] + "\t\t ", time_needed
 
     print "----------------------------------"
 
-    print " avg time GOEL:\t\t", total_goel / num_reps
-    print " avg time OPTIIZED:\t", total_opt / num_reps
-    print " limit overstepped" if optimized.latency_limit_overstepped else " limit held"
+    averages = list()
+    time_plain = 0
+    for ix, cand in enumerate(candidates):
+        avg = np.mean(times[ix])
+        averages.append(avg)
+        print " avg time "+ names[cand] +":\t\t", avg
+        if cand == plain:
+            time_plain = avg
+        else:
+            print "\t\t" + ("limit overstepped" if cand.latency_limit_overstepped else "limit held")
 
+    print " "
 
     if time_plain > 0:
-        print "\t\t ->\t", (total_goel / num_reps) / time_plain, "\n\t\t\t", (total_opt / num_reps) / time_plain,\
-            "\n\t\t\t", 1
+        if plain in candidates and len(candidates) > 1:
+            for ix, cand in enumerate(candidates):
+                if cand == plain:
+                    continue
+                print "\t\t ->\t", averages[ix] / time_plain
+            print "\t\t ->\t1\n"
 
-    if total_goel > 0:
-        verify_correct_result(goel)
-    if total_opt > 0:
-        verify_correct_result(optimized)
+    for cand in candidates:
+        if cand == plain:
+            continue
 
+        print "Testing " + names[cand] + " .."
+        verify_correct_result(cand, verify_optimality=(number_nodes <= 20))
 
     print "done"
+
 
 def dict_differences(attr, first, second, metric, bound, output=True):
     errors_found = False
@@ -624,12 +669,34 @@ def dict_differences(attr, first, second, metric, bound, output=True):
     print attr, "check done" + (", no errors!" if not errors_found else "\n  DIFFERENCES FOUND!!!")
 
 
-def check_result(svpc, req, sub):
-    for e in req.edges:
-        for start in sub.nodes:
-            for end in sub.nodes:
-                path = svpc.get_valid_sedge_path(e, start, end)
-                print path
+
+def construct_sptp_substrate(): # shortest path tree property
+    sub = datamodel.Substrate("test_sub_sptp")
+    sub.add_node("u", types=["t1"], capacity={"t1": 100}, cost={"t1": 1.0})
+    sub.add_node("v", types=["t1"], capacity={"t1": 100}, cost={"t1": 1.0})
+    sub.add_node("t", types=["t1"], capacity={"t1": 100}, cost={"t1": 1.0})
+    sub.add_node("s", types=["t1"], capacity={"t1": 100}, cost={"t1": 1.0})
+
+    sub.add_edge("u", "v", capacity=100.0, cost=1.0, bidirected=False)
+    sub.add_edge("v", "t", capacity=100.0, cost=1.0, bidirected=False)
+    sub.add_edge("s", "u", capacity=100.0, cost=1.0, bidirected=False)
+    sub.add_edge("s", "v", capacity=100.0, cost=1.0, bidirected=False)
+
+    edge_costs = {
+        ("u", "v") : 3,
+        ("s", "v") : 1,
+        ("v", "t") : 5,
+        ("s", "u") : 1,
+    }
+    edge_latencies = {
+        ("u", "v") : 2,
+        ("s", "v") : 9,
+        ("v", "t") : 2,
+        ("s", "u") : 4,
+    }
+
+    return sub, edge_costs, edge_latencies
+
 
 
 if __name__ == "__main__":
