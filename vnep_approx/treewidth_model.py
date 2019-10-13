@@ -667,27 +667,16 @@ class ShortestValidPathsComputer(object):
         self.temp_latencies = np.full(self.number_of_nodes, -1, dtype=np.float64)
         self.node_infeasible = np.full(self.number_of_nodes, False, dtype=np.bool)
         self.distances = np.full((self.number_of_nodes, 32 + 1), np.inf, dtype=np.float64)
-        # self.preds = np.full((self.number_of_nodes, 32 + 1), -1, dtype=np.int32)
-        # self.predecessors = np.full(self.number_of_nodes, -1, np.int32)
 
         self.edge_set_id_to_edge_set = 0
         self.number_of_valid_edge_sets = 0
         self.valid_sedge_costs = dict()
         self.valid_sedge_paths = dict()
 
-        # self.edge_set_id_to_edge_set = self.valid_mapping_restriction_computer.get_edge_set_mapping()
-        # self.number_of_valid_edge_sets = self.valid_mapping_restriction_computer.get_number_of_different_edge_sets()
-        # self.valid_sedge_costs = dict(zip(range(self.number_of_valid_edge_sets), [{}] * self.number_of_valid_edge_sets))
-        # self.valid_sedge_paths = dict(zip(range(self.number_of_valid_edge_sets), [{}] * self.number_of_valid_edge_sets))
-
-
     def compute(self):
         # reset values
         self.temp_latencies.fill(-1)
         self.node_infeasible.fill(False)
-        # self.distances.fill(np.inf)
-        # self.preds.fill(-1)
-        # self.predecessors.fill(-1)
 
         self.edge_set_id_to_edge_set = self.valid_mapping_restriction_computer.get_edge_set_mapping()
         self.number_of_valid_edge_sets = self.valid_mapping_restriction_computer.get_number_of_different_edge_sets()
@@ -700,9 +689,6 @@ class ShortestValidPathsComputer(object):
         if self.number_of_valid_edge_sets == 0:
             print "ERROR: no valid edges"
             return
-
-        # if self.number_of_valid_edge_sets == 1 and self.edge_set_id_to_edge_set[0] == self.substrate.edges:
-        #     print "Only using all edges !"
 
         self._compute_all_pairs()
 
@@ -763,7 +749,7 @@ class ShortestValidPathsComputer(object):
     def get_valid_sedge_path(self, request_edge, source_mapping, target_mapping):
         request_edge_to_edge_set_id = self.valid_mapping_restriction_computer.get_reqedge_to_edgeset_id_mapping()
         edge_set_id = request_edge_to_edge_set_id[request_edge]
-        return self.valid_sedge_paths[edge_set_id][source_mapping].get(target_mapping, None)
+        return self.valid_sedge_paths[edge_set_id][source_mapping].get(target_mapping, [])
 
 
 class ShortestValidPathsComputer_Flex(ShortestValidPathsComputer):
@@ -829,9 +815,9 @@ class ShortestValidPathsComputer_Flex(ShortestValidPathsComputer):
     def _approx_latencies(self, num_source_node):
         self._preprocess(num_source_node)
 
-        tau = 3  # int(self.limit) / 100 + 1 # max(int(math.log(self.limit) / 2), 1)
+        tau = 3
 
-        self.paths = {i: None for i in range(self.number_of_nodes)}
+        self.paths = {i: None for i in self.node_nums}
         self.paths[num_source_node] = []
 
         approx_holds = False
@@ -841,9 +827,6 @@ class ShortestValidPathsComputer_Flex(ShortestValidPathsComputer):
 
         while not approx_holds:
 
-            # print " ---------------- tau:  ", tau, "\t\t -----------------"
-
-            # tau_modified_latencies = {}
             for key, value in self.edge_latencies.iteritems():
                 val = int((value * tau) / self.limit)
                 self.tau_modified_latencies[key] = val
@@ -856,9 +839,6 @@ class ShortestValidPathsComputer_Flex(ShortestValidPathsComputer):
 
                 if closed_nodes[num_target_node]:
                     continue
-
-                if tau / 2 > self.number_of_nodes / self.epsilon:
-                    print "ERROR: too many iterations"
 
                 if self.preds[num_target_node][tau] == -1:
                     approx_holds = False
@@ -874,11 +854,12 @@ class ShortestValidPathsComputer_Flex(ShortestValidPathsComputer):
                     sedge = self.num_id_to_snode_id[pred], self.num_id_to_snode_id[n]
                     path.append(sedge)
                     added_latencies += self.edge_latencies[sedge]
-                    t -= tau_modified_latencies[sedge]
+                    t -= self.tau_modified_latencies[sedge]
                     n = pred
                 path = list(reversed(path))
 
                 if not approx_holds or added_latencies > (1 + self.epsilon) * self.limit:
+                    approx_holds = False
                     tau *= 2
                     break
 
@@ -894,11 +875,7 @@ class ShortestValidPathsComputer_Flex(ShortestValidPathsComputer):
 
             self._prepare_valid_edges(edge_set_index)
 
-            # print "  edgeset ", edge_set_index
-
             for num_source_node in range(self.number_of_nodes):
-
-                # print "    starting from ", num_source_node
 
                 converted_path_dict = {}
                 source_snode = self.num_id_to_snode_id[num_source_node]
@@ -911,9 +888,7 @@ class ShortestValidPathsComputer_Flex(ShortestValidPathsComputer):
                     costs = self.distances[num_target_node][final_tau]
                     self.valid_sedge_costs[edge_set_index][(source_snode, target_snode)] = costs
 
-                    if np.isnan(costs):
-                        print "shouldnt happen"
-                    elif self.temp_latencies[num_target_node] > self.limit:
+                    if not np.isnan(costs) and self.temp_latencies[num_target_node] > self.limit:
                         self.latency_limit_overstepped = True
 
                     converted_path_dict[target_snode] = self.paths[num_target_node]
@@ -1068,11 +1043,7 @@ class ShortestValidPathsComputer_Strict(ShortestValidPathsComputer):
 
             for num_source_node in range(self.number_of_nodes):
 
-                # print "  starting from ", num_source_node
                 self._preprocess(num_source_node)
-                # print self.substrate.get_number_of_nodes(), self.substrate.get_number_of_edges()
-                # print self.num_feasible_nodes, len(self.current_valid_edge_set)
-
                 converted_path_dict = {}
 
                 for num_target_node in self.node_nums:
@@ -1170,6 +1141,7 @@ class ShortestValidPathsComputer_Exact(ShortestValidPathsComputer):
                 self.valid_sedge_paths[edge_set_index][self.num_id_to_snode_id[num_source_node]] = converted_path_dict
 
 
+# end
 
 class OptimizedDynVMPNode(object):
 
@@ -1585,6 +1557,13 @@ class OptimizedDynVMPNode(object):
         self.mapping_costs[self.validity_array] = 0.0
 
 
+approx_str_to_type = {
+    'no latencies': ShortestValidPathsComputer.Approx_NoLatencies,
+    'flex': ShortestValidPathsComputer.Approx_Flex,
+    'strict': ShortestValidPathsComputer.Approx_Strict,
+    'exact': ShortestValidPathsComputer.Approx_Exact
+}
+
 class OptimizedDynVMP(object):
 
     ''' The actual algorithm to compute optimal valid mappings using dynamic programming. Nearly all algorithmic challenging
@@ -1602,12 +1581,10 @@ class OptimizedDynVMP(object):
 
         self.vmrc = ValidMappingRestrictionComputer(substrate=substrate, request=request)
 
-        approx_str_to_type = {
-            'no latencies': ShortestValidPathsComputer.Approx_NoLatencies,
-            'flex': ShortestValidPathsComputer.Approx_Flex,
-            'strict': ShortestValidPathsComputer.Approx_Strict,
-            'exact': ShortestValidPathsComputer.Approx_Exact
-        }
+        try:
+            limit *= substrate.get_average_node_distance()
+        except:
+            pass
 
         self.svpc = ShortestValidPathsComputer.createSVPC(approx_str_to_type[lat_approx_type],
                                                           substrate,
@@ -1618,18 +1595,6 @@ class OptimizedDynVMP(object):
                                                           limit)
 
         self.lat_approx_type = lat_approx_type
-
-        # if lat_approx_type == 'flex':
-        #     self.svpc = ShortestValidPathsComputer(substrate, self.vmrc, self.sedge_costs, self.sedge_latencies, epsilon, limit)
-        #     # print "Using SVPC Goel"
-        # elif lat_approx_type == 'strict':
-        #     self.svpc = ShortestValidPathsComputerLORENZ(substrate, self.vmrc, self.sedge_costs, self.sedge_latencies, epsilon, limit)
-        #     # print "Using SVPC Lorenz"
-        # else:
-        #     self.svpc = ShortestValidPathsComputerWithoutLatencies(substrate=substrate, request=None,
-        #                                                        valid_mapping_restriction_computer=self.vmrc,
-        #                                                        edge_costs=self.sedge_costs)
-            # print "Using SVPC Dijkstra - no latencies considered"
 
 
     def _initialize_costs(self, snode_costs, sedge_costs):
@@ -1658,47 +1623,9 @@ class OptimizedDynVMP(object):
     def initialize_data_structures(self):
         self.vmrc.compute()
 
-        print ("\t\t\t\t\t\t\t\t" if os.getpid()%2==0 else ""), "finding shortest paths for {}".format(self.request.name), \
-                ("\t\t\t\t\t\t\t\t" if os.getpid() % 2 == 1 else ""), "\t\t\t{}".format(self.lat_approx_type)
+        print ("finding shortest paths for {} using {}".format(self.request.name, self.lat_approx_type))
 
-
-        # with open("pickles/before/{}_mappings_{}.p".format(self.request.name, os.getpid()%2), "wb") as f:
-        #     pickle.dump(self.svpc, f, protocol=pickle.HIGHEST_PROTOCOL)
-        #     print "pickle saved"
-        #
-        # start_time = time.time()
         self.svpc.compute()
-        # print ("\t\t\t\t\t\t\t\t" if os.getpid()%2==0 else ""), "\t time: ", time.time() - start_time
-        #
-        # with open("pickles/after/{}_mappings_{}.p".format(self.request.name, os.getpid()%2), "wb") as f:
-        #     pickle.dump(self.svpc, f, protocol=pickle.HIGHEST_PROTOCOL)
-        #     print "pickle saved"
-
-
-        # b = os.getpid()%2
-        #
-        # if self.counter[b] > 0:
-        #     try:
-        #         with open("pickles/{}_mappings_{}.p".format(self.request.name, b), 'rb') as handle:
-        #             self.svpc = pickle.load(handle)
-        #         self.counter[b] -= 1
-        #     except Exception:
-        #         print "pickle '{}_mappings_{}.p' could not be loaded, computing new".format(self.request.name, b)
-        #         self.svpc.compute()
-
-
-        # if os.getpid()%2==0 and self.counter > 0:
-        #     try:
-        #         with open("pickles/{}_mappings.p".format(self.request.name), 'rb') as handle:
-        #             self.svpc = pickle.load(handle)
-        #         self.counter -= 1
-        #     except Exception:
-        #         print "pickle '{}_mappings.p' could not be loaded, computing new".format(self.request.name)
-        #         self.svpc.compute()
-
-        # with open("pickles/{}_mappings_{}.p".format(self.request.name, os.getpid()%2), "wb") as f:
-        #     pickle.dump(self.svpc, f, protocol=pickle.HIGHEST_PROTOCOL)
-        #     print "pickle saved"
 
 
         self.sorted_snodes = sorted(list(self.substrate.nodes))

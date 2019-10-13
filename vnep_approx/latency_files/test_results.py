@@ -6,7 +6,7 @@ import traceback
 def verify_correct_result(svpc, verify_optimality=False):
     """ this function checks that:
         1) every path is valid and no path exceeds the latency limit
-        2) the costs among a path is what is returned by costs
+        2) the costs along a path is what is returned by costs
         3) every feasible node has an associated path and cost
         4) every infeasible node has associated costs of NaN and path of None
         5) dijkstra using latency metric is upper bound on costs
@@ -44,9 +44,10 @@ def verify_correct_result(svpc, verify_optimality=False):
                                       .format(start_snode, target_snode, edgeset_index))
 
                     # check criterium 2         - numeric instability => very small deviations possible
-                    if abs(total_costs - svpc.get_valid_sedge_costs_from_edgesetindex(edgeset_index, (start_snode, target_snode))) > 1e-12:
-                        errors.append("Costs unequal to those along the path!\n  from {} to {}, edgeset {}"
-                                      .format(start_snode, target_snode, edgeset_index))
+                    deviation = abs(total_costs - svpc.get_valid_sedge_costs_from_edgesetindex(edgeset_index, (start_snode, target_snode)))
+                    if deviation > 1e-12:
+                        errors.append("Costs unequal to those along the path, difference {}!\n  from {} to {}, edgeset {}"
+                                      .format(deviation, start_snode, target_snode, edgeset_index))
 
                     if verify_optimality:
                         _verify_optimality(svpc, total_costs, svpc.snode_id_to_num_id[start_snode], svpc.snode_id_to_num_id[target_snode], edgeset_index)
