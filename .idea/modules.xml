@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="ProjectModuleManager">
+    <modules>
+      <module fileurl="file://$PROJECT_DIR$/../alib/.idea/alib.iml" filepath="$PROJECT_DIR$/../alib/.idea/alib.iml" />
+      <module fileurl="file://$PROJECT_DIR$/../evaluation-acm-ccr-2019/.idea/evaluation-acm-ccr-2019.iml" filepath="$PROJECT_DIR$/../evaluation-acm-ccr-2019/.idea/evaluation-acm-ccr-2019.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/vnep-approx.iml" filepath="$PROJECT_DIR$/.idea/vnep-approx.iml" />
+    </modules>
+  </component>
+</project>
