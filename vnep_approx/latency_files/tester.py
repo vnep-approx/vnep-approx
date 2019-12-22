@@ -1,7 +1,6 @@
 import random
 import time
 import numpy as np
-import cPickle as pickle
 
 from alib import datamodel
 from test.treewidth_model.test_data.request_test_data import example_requests
@@ -116,9 +115,6 @@ def run_SVPC_comparison():
 
 
 def create_large_substrate(num_nodes, edge_res_factor):
-    # if num_nodes > 26:
-    #     num_nodes = 26
-
     import string
 
     names = []
@@ -175,9 +171,6 @@ def check_edges_in_substrate(svpc, sub):
         for start_node in sub.nodes:
             for target_node in sub.nodes:
                 path = svpc.valid_sedge_paths[edgeset][start_node][target_node]
-
-                split_path = set()
-
 
                 if not path <= sub.edges:
                     print "ERROR!!"
@@ -245,66 +238,7 @@ def check_approximation_guarantee(approximated_costs, actual_costs, epsilon):
             if not approx_correct:
                 errors.append((edge_set_index, start_node, end_node, costs, act_costs, factor))
 
-            # print "Costs from {} to {}:\n\tmine\t{}\n\this:\t{}\n\t\t\t\t->  {}"\
-            #     .format(start_node, end_node, costs, act_costs, approx_correct)
-
         return max_factor, errors
-
-def dict_differences(attr, first, second, metric, bound, output=True):
-    errors_found = False
-    for key, edgesets in first.iteritems():
-        for key2, value2 in edgesets.iteritems():
-
-            if attr == "paths":
-                for key3, value3 in value2.iteritems():
-                    if output:
-                        print "  checking ", second[key][key2][key3], " == ", value3
-                    # if second[key][key2][key3] != value3:
-                    if second.get_valid_sedge_path(key, key2, key3) != value3:
-                        # print "ERROR: opt[", key2, ", ", key3, "] = \n\t", value3, " != \n\t", second[key][key2][key3], " = lor[", key, "]"
-                        # errors_found = True
-
-                        second_costs = 0
-                        for e in second[key][key2][key3]:
-                            second_costs += metric[e]
-
-                        first_costs = 0
-                        for e in value3:
-                            first_costs += metric[e]
-
-                        if first_costs > bound:
-                            print "ERROR: opt[", key2, ", ", key3, "] = \n\t", first_costs, " != \n\t", second_costs, " = lor[", key, "]"
-                            errors_found = True
-
-            elif attr == "costs":
-                if output:
-                    print "  checking ", second[key][key2], " == ", value2
-                if second[key][key2] < value2 and not (np.isnan(second[key][key2]) and np.isnan(value2)):
-                    print "ERROR: opt[", key2, "] = \n\t", value2, " != \n\t", second[key][key2], " = lor[", key, "]"
-                    errors_found = True
-    print attr, "check done" + (", no errors!" if not errors_found else "\n  DIFFERENCES FOUND!!!")
-
-
-def save_resources(sub, req, costs, lat):
-    with open('pickles/costs.p', 'wb') as handle:
-        pickle.dump(costs, handle, protocol=pickle.HIGHEST_PROTOCOL)
-    with open('pickles/lat.p', 'wb') as handle:
-        pickle.dump(lat, handle, protocol=pickle.HIGHEST_PROTOCOL)
-    with open('pickles/sub.p', 'wb') as handle:
-        pickle.dump(sub, handle, protocol=pickle.HIGHEST_PROTOCOL)
-    with open('pickles/req.p', 'wb') as handle:
-        pickle.dump(req, handle, protocol=pickle.HIGHEST_PROTOCOL)
-
-def load_resources():
-    with open('pickles/lat.p', 'rb') as handle:
-        b = pickle.load(handle)
-    with open('pickles/costs.p', 'rb') as handle:
-        c = pickle.load(handle)
-    with open('pickles/sub.p', 'rb') as handle:
-        a = pickle.load(handle)
-    with open('pickles/req.p', 'rb') as handle:
-        d = pickle.load(handle)
-    return a, d, c, b
 
 
 def build_triangle():
@@ -321,7 +255,7 @@ def build_triangle():
 
     return sub
 
-def construct_sptp_substrate(): # shortest path tree property
+def construct_sptp_substrate(): # to check shortest path tree property
     sub = datamodel.Substrate("test_sub_sptp")
     sub.add_node("u", types=["t1"], capacity={"t1": 100}, cost={"t1": 1.0})
     sub.add_node("v", types=["t1"], capacity={"t1": 100}, cost={"t1": 1.0})

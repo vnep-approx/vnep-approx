@@ -1389,8 +1389,6 @@ class OptimizedDynVMPNode(object):
 
                 for mapping_of_source, mapping_of_target in itertools.product(self.allowed_nodes[reqedge_source],
                                                                     self.allowed_nodes[reqedge_target]):
-                    # if np.isnan(self.svpc.valid_sedge_costs[(reqedge_source, reqedge_target)][(mapping_of_source, mapping_of_target)]):
-
                     if np.isnan(self.svpc.get_valid_sedge_costs_for_reqedge((reqedge_source, reqedge_target), (mapping_of_source, mapping_of_target))):
 
                         list_of_indices = self.get_indices_of_mappings_under_restrictions(
@@ -1582,6 +1580,7 @@ class OptimizedDynVMP(object):
         self.vmrc = ValidMappingRestrictionComputer(substrate=substrate, request=request)
 
         try:
+            # rescale limit value to adapt to different substrate sizes
             limit *= substrate.get_average_node_distance()
         except:
             pass
@@ -1624,7 +1623,6 @@ class OptimizedDynVMP(object):
         self.vmrc.compute()
 
         print ("finding shortest paths for {} using {}".format(self.request.name, self.lat_approx_type))
-
         self.svpc.compute()
 
 
@@ -1659,10 +1657,8 @@ class OptimizedDynVMP(object):
             current_edge_costs_array.fill(0.0)
             for node_pair_index, (snode_1, snode_2) in enumerate(
                     itertools.product(self.sorted_snodes, self.sorted_snodes)):
-                current_edge_costs_array[node_pair_index] = self.svpc.get_valid_sedge_costs_from_edgesetindex(edge_set_index, (snode_1, snode_2))
-
-                # current_edge_costs_array[node_pair_index] = self.svpc.valid_sedge_costs[edge_set_index][
-                #     (snode_1, snode_2)]
+                current_edge_costs_array[node_pair_index] = self.svpc.\
+                    get_valid_sedge_costs_from_edgesetindex(edge_set_index, (snode_1, snode_2))
 
     def compute_solution(self):
         for t in self.ssntda.post_order_traversal:
@@ -1729,17 +1725,6 @@ class OptimizedDynVMP(object):
 
 
     def _reconstruct_edge_mapping(self, reqedge, source_mapping, target_mapping):
-        # reqedge_predecessors = self.svpc.valid_sedge_pred[reqedge][source_mapping]
-        # u = target_mapping
-        # path = []
-        # while u != source_mapping:
-        #     pred = reqedge_predecessors[u]
-        #     path.append((pred, u))
-        #     u = pred
-        # path = list(reversed(path))
-        # return self.svpc.valid_sedge_paths[reqedge][source_mapping][target_mapping]
-        # return path
-
         return self.svpc.get_valid_sedge_path(reqedge, source_mapping, target_mapping)
 
 
@@ -1796,15 +1781,6 @@ class OptimizedDynVMP(object):
     def reinitialize(self, new_node_costs, new_edge_costs):
 
         self._initialize_costs(new_node_costs, new_edge_costs)
-        #
-        # print "reinitializing request ", self.request.name
-        #
-        # if self.request.name == "vnet_6":
-        #     with open('pickles/svpc_bug2.p', 'wb') as handle:
-        #         pickle.dump(self.svpc, handle, protocol=pickle.HIGHEST_PROTOCOL)
-        #     print "pickle saved"
-        #     # exit(1)
-
         self.svpc.recompute_with_new_costs(new_edge_costs)
         self._initialize_cost_arrays()
 
@@ -2555,18 +2531,9 @@ class RandRoundSepLPOptDynVMPCollection(object):
         self.requests = self.scenario.requests
         self.objective = self.scenario.objective
 
-        # self.edge_latencies = {}
-        # for sedge in self.substrate.edges:
-        #     self.edge_latencies[sedge] = self.substrate.edge[sedge]["latency"]
-
-        # total_latencies = 0
-        # for lat in sorted(self.edge_latencies.values(), reverse=True)[:self.substrate.get_number_of_nodes()]:
-        #     total_latencies += lat
-
         self.latency_approximation_factor = latency_approximation_factor
         self.latency_approximation_limit = latency_approximation_limit # * total_latencies
         self.latency_approximation_type = latency_approximation_type if latency_approximation_type is not None else 'no latencies'
-
 
         self.rounding_order_list = []
         self.lp_recomputation_list = []
@@ -3558,3 +3525,120 @@ construct_name_tw_lp = modelcreator.build_construct_name([
     ("sol_name", "solution"),
 ])
 
+
+class _TreewidthModelCreator(modelcreator.AbstractEmbeddingModelCreator):
+
+    ''' Base for implementing a (not yet published) LP based on tree decompositions. Note that we expect the separation oracle
+        based LP to be (nearly always) quicker than using this one.
+        We have not really tested this implementation and you should probably not use it (without knowing what you are doing).
+    '''
+    def __init__(self,
+                 scenario,
+                 precomputed_tree_decompositions=None,  # Allow passing a dict of tree decompositions (mainly for testing)
+                 gurobi_settings=None,
+                 optimization_callback=modelcreator.gurobi_callback,
+                 lp_output_file=None,
+                 potential_iis_filename=None,
+                 logger=None):
+        super(_TreewidthModelCreator, self).__init__(scenario,
+                                                     gurobi_settings=gurobi_settings,
+                                                     optimization_callback=optimization_callback,
+                                                     lp_output_file=lp_output_file,
+                                                     potential_iis_filename=potential_iis_filename,
+                                                     logger=logger)
+
+        self.tree_decompositions = {}
+        if precomputed_tree_decompositions is not None:
+            self.tree_decompositions.update(precomputed_tree_decompositions)
+
+    def preprocess_input(self):
+        for req in self.scenario.requests:
+            if req.name not in self.tree_decompositions:
+                self.tree_decompositions[req.name] = compute_tree_decomposition(req)
+            if not self.tree_decompositions[req.name].is_tree_decomposition(req):
+                raise ValueError("Tree decomposition failed for request {}!".format(req))
+
+    def create_variables_other_than_embedding_decision_and_request_load(self):
+        self.y_vars = {}
+        self.z_vars = {}
+
+        for req in self.requests:
+            self._create_y_variables(req)
+            self._create_z_variables(req)
+
+    def _create_y_variables(self, req):
+        td = self.tree_decompositions[req.name]
+        self.y_vars[req.name] = {}
+        for bag_id, bag_nodes in td.node_bag_dict.items():
+            self.y_vars[req.name][bag_id] = {}
+            for a in mapping_space(req, self.substrate, sorted(bag_nodes)):
+                variable_name = construct_name_tw_lp("bag_mapping", req_name=req.name, bag=bag_id, bag_mapping=a)
+                self.y_vars[req.name][bag_id][a] = self.model.addVar(lb=0.0,
+                                                                     ub=1.0,
+                                                                     obj=0.0,
+                                                                     vtype=GRB.BINARY,
+                                                                     name=variable_name)
+
+    def _create_z_variables(self, req):
+        self.z_vars[req.name] = {}
+        for ij in req.edges:
+            self.z_vars[req.name][ij] = {}
+            for uv in self.substrate.edges:
+                self.z_vars[req.name][ij][uv] = {}
+                for w in self.substrate.nodes:
+                    variable_name = construct_name_tw_lp("flow", req_name=req.name, vedge=ij, sedge=uv, snode=w)
+                    self.z_vars[req.name][ij][uv][w] = self.model.addVar(lb=0.0,
+                                                                         ub=1.0,
+                                                                         obj=0.0,
+                                                                         vtype=GRB.BINARY,
+                                                                         name=variable_name)
+
+    def create_constraints_other_than_bounding_loads_by_capacities(self):
+        for req in self.requests:
+            self._create_constraints_embed_bags_equally(req)
+            self._create_constraints_flows(req)
+
+    def _create_constraints_embed_bags_equally(self, req):
+        td = self.tree_decompositions[req.name]
+        for bag in td.nodes:
+            constr_name = construct_name_tw_lp("embed_bags_equally", req_name=req.name, bag=bag)
+            expr = LinExpr(
+                [(-1.0, self.var_embedding_decision[req])] +
+                [(1.0, var) for bag_mapping, var in self.y_vars[req.name][bag].items()]
+            )
+            self.model.addConstr(LinExpr(expr), GRB.EQUAL, 0.0, constr_name)
+
+    def _create_constraints_flows(self, req):
+        td = self.tree_decompositions[req.name]
+        for ij in req.edges:
+            i, j = ij
+            t_ij = td.get_any_covering_td_node(i, j)
+
+            t_ij_nodes = sorted(td.node_bag_dict[t_ij])
+            i_idx = t_ij_nodes.index(i)
+            j_idx = t_ij_nodes.index(j)
+
+            y_dict_for_t_ij = self.y_vars[req.name][t_ij]
+
+            for w in self.substrate.nodes:
+                for u in self.substrate.nodes:
+                    if u == w:
+                        continue
+                    terms = ([(1.0, self.z_vars[req.name][ij][uv][w]) for uv in self.substrate.get_out_edges(u)]
+                             + [(-1.0, self.z_vars[req.name][ij][vu][w]) for vu in self.substrate.get_in_edges(u)]
+                             + [(-1.0, y_dict_for_t_ij[a]) for a in y_dict_for_t_ij if a[i_idx] == u and a[j_idx] == w])
+
+                    constr_name = construct_name_tw_lp("flows", req_name=req.name, vedge=ij, snode=u, other=w)
+                    expr = LinExpr(terms)
+                    self.model.addConstr(LinExpr(expr), GRB.EQUAL, 0.0, constr_name)
+
+
+def mapping_space(request, substrate, req_nodes):
+    allowed_nodes_list = []
+    for i in req_nodes:
+        allowed_nodes = request.get_allowed_nodes(i)
+        if allowed_nodes is None:
+            allowed_nodes = list(substrate.nodes)
+        allowed_nodes_list.append(allowed_nodes)
+    for sub_node_tuple in itertools.product(*allowed_nodes_list):
+        yield sub_node_tuple
