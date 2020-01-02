@@ -219,7 +219,7 @@ class RandRoundSepLPOptDynVMPCollectionForFogModel(twm.RandRoundSepLPOptDynVMPCo
             elif type(sres) is tuple and self.universal_node_type in sres:
                 node_type, node_id = sres
                 res_cost = self.substrate.node[node_id]['cost'][node_type]
-            elif type(sres) is int and sres in self.substrate.node:
+            elif (type(sres) is int or type(sres) is str) and sres in self.substrate.node:
                 # checking the last possible key types of allocations
                 continue
 
