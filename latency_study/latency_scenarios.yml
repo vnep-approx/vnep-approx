@@ -1,0 +1,45 @@
+#Very small subset of parameters used in our evaluation. Only 4 scenarios are generated
+
+request_generation:
+    - cactus:
+        CactusRequestGenerator:
+            number_of_requests: [30]
+            branching_distribution: [[0.15,0.5,0.35]]
+            min_number_of_nodes: [4]
+            max_number_of_nodes: [15]
+            layers: [3]
+            probability: [1.0]
+            max_cycles: [9999]
+            iterations: [10000]
+            fix_root_mapping: [False]
+            fix_leaf_mapping: [False]
+            node_resource_factor: [0.3, 0.8]
+            edge_resource_factor: [0.3, 0.8]
+            arbitrary_edge_orientations: [True]
+            normalize: [True]
+
+
+profit_calculation:
+    - optimal:
+        OptimalEmbeddingProfitCalculator:
+            profit_factor: [1.0]
+            timelimit: [90]
+
+node_placement_restriction_mapping:
+    - neighbors:
+        NeighborhoodSearchRestrictionGenerator:
+            potential_nodes_factor: [0.25]
+
+substrate_generation:
+    - substrates:
+        TopologyZooReader:
+            topology: [Eunetworks, Funet]
+            node_types: [[universal]]
+            node_capacity: [100.0]
+            node_cost_factor: [1.0]
+            edge_capacity: [100.0]
+            node_type_distribution: [1.0]
+            include_latencies: [True]
+
+scenario_repetition: 3
+

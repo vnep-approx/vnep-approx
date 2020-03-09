@@ -1,0 +1,20 @@
+SCENARIO_INPUT_PICKLE: "scenarios.pickle"
+RESULT_OUTPUT_PICKLE:  "latency_study_results.pickle"
+
+RUN_PARAMETERS:
+    - ALGORITHM:
+        ID: RandRoundSepLPOptDynVMPCollection
+
+        GUROBI_PARAMETERS:
+          threads: [1]
+
+        ALGORITHM_PARAMETERS:
+          rounding_order_list : [ !!python/tuple ["RAND", "STATIC_REQ_PROFIT", "ACHIEVED_REQ_PROFIT"]] #
+          lp_recomputation_mode_list : [ !!python/tuple ["NONE", "RECOMPUTATION_WITHOUT_SEPARATION"]] #"RECOMPUTATION_WITH_SINGLE_SEPARATION"
+          lp_relative_quality : [0.001]
+          rounding_samples_per_lp_recomputation_mode : [ !!python/tuple [ !!python/tuple ["NONE", 50], !!python/tuple ["RECOMPUTATION_WITHOUT_SEPARATION", 2] ] ]
+          number_initial_mappings_to_compute : [50]
+          number_further_mappings_to_add : [10]
+          latency_approximation_type: ['flex', 'strict']
+          latency_approximation_factor: [0.5, 0.1, 0.02]
+          latency_approximation_limit : [3, 5, 10, 15]
