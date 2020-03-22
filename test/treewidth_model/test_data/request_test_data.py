@@ -46,20 +46,14 @@ def create_random_test_request(substrate, **kwargs):
     )
 
 
-def create_test_substrate_large(**kwargs):
-    raw_parameters = dict(
-        topology="Geant2012",
-        node_types=["test_type"],
-        edge_capacity=10.0,
-        node_cost_factor=1.0,
-        node_capacity=10.0,
-        node_type_distribution=1,
-    )
-    raw_parameters.update(kwargs)
-    return scenariogeneration.TopologyZooReader().read_substrate(
-        raw_parameters,
-    )
-
+SINGLE_EDGE = {
+    "nodes": [
+        "i1", "i2"
+    ],
+    "edges": [
+        ("i1", "i2")
+    ],
+}
 
 SIMPLE_PATH = {
     "nodes": [
@@ -396,6 +390,7 @@ example_requests_small = {
 
 
 example_requests = {
+    "single edge": SINGLE_EDGE,
     "simple path": SIMPLE_PATH,
     "simple cycle 1": SIMPLE_CYCLE_1,
     "simple cycle 2": SIMPLE_CYCLE_2,
@@ -417,4 +412,8 @@ example_requests = {
     "dragon 1": DRAGON_1,
     "dragon 2": DRAGON_2,
     "dragon 3": DRAGON_3,
+}
+
+example_requests_1 = {
+    "simple path": SIMPLE_PATH
 }

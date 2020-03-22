@@ -426,7 +426,7 @@ class ViNESingleScenario(object):
             substrate_state_string = "\n\nCurrent substrate is:\n"
             for ntype in self.residual_capacity_substrate.get_types():
                 for node in self.residual_capacity_substrate.get_nodes_by_type(ntype):
-                    substrate_state_string += "\t" + "node {:>3} of cap {:7.3f}\n".format(node, self.residual_capacity_substrate.get_node_type_capacity(node, ntype))
+                    substrate_state_string += "\t" + "node {:>3} of cap {:7.3f} and costs {:7.3f} \n".format(node, self.residual_capacity_substrate.get_node_type_capacity(node, ntype), self.residual_capacity_substrate.get_node_type_cost(node, ntype))
             for edge in self.residual_capacity_substrate.get_edges():
                 substrate_state_string += "\t" + "edge {:>12} of cap {:7.3f}\n".format(edge,
                                                                               self.residual_capacity_substrate.get_edge_capacity(edge))
@@ -451,12 +451,12 @@ class ViNESingleScenario(object):
                 actual_residual_cap = self.residual_capacity_substrate.node[allowed_node]['capacity'][type_of_i] - \
                                       self._provisional_node_allocations[(allowed_node, type_of_i)]
 
-                include_node = (actual_residual_cap - self._current_request.get_node_demand(i)) > 0
+                include_node = (actual_residual_cap - self._current_request.get_node_demand(i)) >= 0.0
 
                 if include_node:
                     allowed_nodes_of_i.append(allowed_node)
-                if self._extended_logging:
-                    node_mapping_log_string += "\tsnode: {:>3} of cap. {:>7.3f} included ({})\n".format(allowed_node, actual_residual_cap, include_node)
+                    if self._extended_logging:
+                        node_mapping_log_string += "\tsnode: {:>3} of cap. {:>7.3f} included ({})\n".format(allowed_node, actual_residual_cap, include_node)
 
             u = self.node_mapper.get_single_node_mapping(i, node_variables, allowed_nodes_of_i)
             if u is None:
@@ -563,7 +563,6 @@ class ViNESingleScenario(object):
             logger=self.logger,
             optimization_callback=None
         )
-        #sub_mc.lp_output_file = single_req_scenario.name  + ".lp"
         sub_mc._disable_temporal_information_output = True
         sub_mc.init_model_creator()
         sub_mc.model.setParam("LogFile", "")

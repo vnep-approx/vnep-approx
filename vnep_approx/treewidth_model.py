@@ -498,7 +498,6 @@ class ValidMappingRestrictionComputer(object):
     def get_number_of_different_edge_sets(self):
         return self.number_of_different_edge_sets
 
-# begin
 
 class ShortestValidPathsComputer_NoLatencies(object):
 
@@ -621,22 +620,27 @@ class ShortestValidPathsComputer_NoLatencies(object):
 
 class ShortestValidPathsComputer(object):
 
+    #TODO make enum
     Approx_NoLatencies = 0
     Approx_Flex = 1
     Approx_Strict = 2
     Approx_Exact = 3
+    Approx_Exact_MIP = 4
 
     @staticmethod
     def createSVPC(approx_type, substrate, valid_mapping_restriction_computer, edge_costs, edge_latencies=None, epsilon=None, limit=None):
         if approx_type == ShortestValidPathsComputer.Approx_Flex:
-            return ShortestValidPathsComputer_Flex		(substrate, valid_mapping_restriction_computer, edge_costs, edge_latencies, epsilon, limit)
-        if approx_type == ShortestValidPathsComputer.Approx_Strict:
-            return ShortestValidPathsComputer_Strict	(substrate, valid_mapping_restriction_computer, edge_costs, edge_latencies, epsilon, limit)
-        if approx_type == ShortestValidPathsComputer.Approx_Exact:
-            return ShortestValidPathsComputer_Exact     (substrate, valid_mapping_restriction_computer, edge_costs, edge_latencies, epsilon, limit)
-
-        return ShortestValidPathsComputer_NoLatencies	(substrate, None, valid_mapping_restriction_computer, edge_costs)
-
+            return ShortestValidPathsComputer_Flex(substrate, valid_mapping_restriction_computer, edge_costs, edge_latencies, epsilon, limit)
+        elif approx_type == ShortestValidPathsComputer.Approx_Strict:
+            return ShortestValidPathsComputer_Strict(substrate, valid_mapping_restriction_computer, edge_costs, edge_latencies, epsilon, limit)
+        elif approx_type == ShortestValidPathsComputer.Approx_Exact:
+            return ShortestValidPathsComputer_Exact(substrate, valid_mapping_restriction_computer, edge_costs, edge_latencies, epsilon, limit)
+        elif approx_type == ShortestValidPathsComputer.Approx_Exact_MIP:
+            return ShortestValidPathsComputer_Exact_MIP(substrate, valid_mapping_restriction_computer, edge_costs, edge_latencies, epsilon, limit)
+        elif approx_type == ShortestValidPathsComputer.Approx_NoLatencies:
+            return ShortestValidPathsComputer_NoLatencies(substrate, None, valid_mapping_restriction_computer, edge_costs)
+        else:
+            raise RuntimeError("Latency approximation type not known!")
 
     def __init__(self, substrate, valid_mapping_restriction_computer, edge_costs, edge_latencies, epsilon, limit):
         self.substrate = substrate
@@ -693,8 +697,9 @@ class ShortestValidPathsComputer(object):
         self._compute_all_pairs()
 
     def recompute_with_new_costs(self, new_edge_costs):
+        #TODO: here a new copy logic was introduced,
         for sedge, cost in new_edge_costs.iteritems():
-            self.edge_costs[sedge] = abs(cost)
+            self.edge_costs[sedge] = abs(cost)  #TODO: abs seems absolutely unncessary
 
         self.compute()
 
@@ -1142,6 +1147,250 @@ class ShortestValidPathsComputer_Exact(ShortestValidPathsComputer):
 
 
 # end
+
+
+
+def relative_termination_callback(model, where):
+    if where == GRB.Callback.MIP:
+        best = model.cbGet(GRB.Callback.MIP_OBJBST)
+        bound = model.cbGet(GRB.Callback.MIP_OBJBND)
+        if best < GRB.INFINITY:
+            # We have a feasible solution
+            if best <= bound * (1.0 + 1e-6 + model._epsilon):
+                model.terminate()
+                model._logger.debug("\nTermination MIP execution based on the following values:\n\tbest: {:12.4f}\n\t{:12.4f}\n\t{:12.4f}\n\n".format(best, bound, model._epsilon))
+
+class LatencyConstrainedShortestPathsMIPComputer(modelcreator.AbstractModelCreator):
+
+    ''' Gurobi model to construct and solve the multi-commodity flow formulation for the VNEP.
+
+        Important: inheriting from the AbstractEmbeddingModelCreator, only the core functionality is enabled in this class.
+    '''
+
+    ALGORITHM_ID = "LatencyConstrainedShortestPathsMIPComputer"
+
+    def __init__(self, substrate, valid_mapping_restriction_computer, edge_costs, edge_latencies, epsilon, limit, gurobi_settings=None, logger=None, optimization_callback=relative_termination_callback):
+
+        if epsilon is None:
+            epsilon = 0.0
+        if gurobi_settings is None:
+            gurobi_settings = modelcreator.GurobiSettings(numericfocus=2)
+        else:
+            gurobi_settings.NumericFocus = 2
+
+        super(LatencyConstrainedShortestPathsMIPComputer, self).__init__(gurobi_settings=gurobi_settings, logger=logger, optimization_callback=optimization_callback)
+
+        self.temporal_log = modelcreator.TemporalLog_Disabled()
+        self._disable_temporal_information_output = True
+        self._disable_temporal_log_output = True
+        self.substrate = substrate
+        self.valid_mapping_restriction_computer = valid_mapping_restriction_computer
+        self.edge_costs = edge_costs
+        self.edge_latencies = edge_latencies
+        self.epsilon = epsilon
+        self.limit = limit
+
+        self.edge_set_id_to_edge_set = self.valid_mapping_restriction_computer.get_edge_set_mapping()
+        self.number_of_valid_edge_sets = self.valid_mapping_restriction_computer.get_number_of_different_edge_sets()
+        self.valid_sedge_costs = {edge_set_id: {} for edge_set_id in xrange(self.number_of_valid_edge_sets)}
+        self.valid_sedge_latencies = {edge_set_id: {} for edge_set_id in xrange(self.number_of_valid_edge_sets)}
+        self.valid_sedge_paths = {edge_set_id: {} for edge_set_id in xrange(self.number_of_valid_edge_sets)}
+
+        self.var_latency_bound = None
+        self.var_y = {}
+        self.var_z = {}
+        self.time_lp = None
+
+    def create_variables(self):
+        # node mapping variable
+        for snode in self.substrate.nodes:
+            variable_name = modelcreator.construct_name("node_mapping",
+                                                        snode=snode)
+
+            self.var_y[snode] = self.model.addVar(lb=-1.0,
+                                                  ub=1.0,
+                                                  obj=0.0,
+                                                  vtype=GRB.INTEGER,
+                                                  name=variable_name)
+
+        # flow variable
+        for (u, v) in self.substrate.edges:
+            variable_name = modelcreator.construct_name("flow",
+                                                        sedge=(u, v))
+            self.var_z[(u, v)] = self.model.addVar(lb=0.0,
+                                                   ub=1.0,
+                                                   obj=0.0,
+                                                   vtype=GRB.BINARY,
+                                                   name=variable_name)
+
+        self.var_latency_bound = self.model.addVar(lb=self.limit, ub=self.limit, obj=0.0, vtype=GRB.CONTINUOUS, name="latency_bound")
+
+        self.model.update()
+
+    def create_constraints(self):
+        self.create_constraints_flow_preservation_and_induction()
+        self.create_constraint_only_one_outgoing_edge_and_one_incoming_edge()
+        self.create_latency_bound_constraint()
+
+    def create_constraints_flow_preservation_and_induction(self):
+        for u in self.substrate.nodes:
+            right_expr = LinExpr(self.var_y[u])
+
+            left_outgoing = LinExpr([(1.0, self.var_z[sedge]) for sedge in self.substrate.out_edges[u]])
+            left_incoming = LinExpr([(1.0, self.var_z[sedge]) for sedge in self.substrate.in_edges[u]])
+            left_expr = LinExpr(left_outgoing - left_incoming)
+            constr_name = modelcreator.construct_name("flow_preservation_and_induction",
+                                                      snode=u)  # Matthias: changed to conform to standard naming
+            self.model.addConstr(left_expr, GRB.EQUAL, right_expr, name=constr_name)
+
+    def create_constraint_only_one_outgoing_edge_and_one_incoming_edge(self):
+        for u in self.substrate.nodes:
+            outgoing_flows = LinExpr([(1.0, self.var_z[sedge]) for sedge in self.substrate.out_edges[u]])
+            constr_name = modelcreator.construct_name("maximal_one_outgoing_edge",
+                                                      snode=u)  # Matthias: changed to conform to standard naming
+            self.model.addConstr(outgoing_flows, GRB.LESS_EQUAL, 1.0, name=constr_name)
+
+            outgoing_flows = LinExpr([(1.0, self.var_z[sedge]) for sedge in self.substrate.in_edges[u]])
+            constr_name = modelcreator.construct_name("maximal_one_incoming_edge",
+                                                      snode=u)  # Matthias: changed to conform to standard naming
+            self.model.addConstr(outgoing_flows, GRB.LESS_EQUAL, 1.0, name=constr_name)
+
+
+    def create_latency_bound_constraint(self):
+        latency_of_edges = LinExpr([(self.edge_latencies[sedge], self.var_z[sedge]) for sedge in self.substrate.edges])
+        constr_name = "latency_bound_constraint"
+        self.model.addConstr(latency_of_edges, GRB.LESS_EQUAL, self.var_latency_bound, name=constr_name)
+
+    def constrain_paths_to_allowed_edges(self, allowed_edges):
+        for sedge in self.substrate.edges:
+            if sedge in allowed_edges:
+                self.var_z[sedge].ub = 1.0
+            else:
+                self.var_z[sedge].ub = 0.0
+        self.model.update()
+
+    def set_source_and_target_node(self, source, target):
+        for snode in self.substrate.nodes:
+            if snode == source:
+                if snode == target:
+                    self.var_y[snode].ub = 0.0
+                    self.var_y[snode].lb = 0.0
+                else:
+                    self.var_y[snode].ub = 1.0
+                    self.var_y[snode].lb = 1.0
+            elif snode == target:
+                self.var_y[snode].ub = -1.0
+                self.var_y[snode].lb = -1.0
+            else:
+                self.var_y[snode].ub = 0.0
+                self.var_y[snode].lb = 0.0
+        self.model.update()
+
+    def preprocess_input(self):
+        pass
+
+    def create_objective(self):
+        objective_expr = LinExpr([(self.edge_costs[sedge], self.var_z[sedge]) for sedge in self.substrate.edges])
+        self.model.setObjective(objective_expr, GRB.MINIMIZE)
+
+    def compute_fractional_solution(self):
+        raise NotImplementedError("Computing fraction paths makes no sense here.")
+
+    def compute_all_pairs_shortest_paths(self):
+        self.model._epsilon = self.epsilon
+        self.model._logger = self.logger
+        for edge_set_index in xrange(self.number_of_valid_edge_sets):
+            self.constrain_paths_to_allowed_edges(self.edge_set_id_to_edge_set[edge_set_index])
+
+            for snode in self.substrate.nodes:
+                for o_snode in self.substrate.nodes:
+                    self._snode = snode
+                    self._o_snode = o_snode
+
+
+                    self.set_source_and_target_node(snode, o_snode)
+                    self.compute_integral_solution()
+
+                    if self.status.isFeasible():
+                        edge_path, cost_value, latency = self.solution
+                    else:
+                        edge_path = None
+                        cost_value = np.nan
+                        latency = np.nan
+
+                    self.valid_sedge_costs[edge_set_index][(snode, o_snode)] = cost_value
+                    self.valid_sedge_paths[edge_set_index][(snode, o_snode)] = edge_path
+                    self.valid_sedge_latencies[edge_set_index][(snode, o_snode)] = latency
+
+
+    def recover_integral_solution_from_variables(self):
+        node_path = []
+        edge_path = []
+        cost_value = 0.0
+        latency = 0.0
+
+        start_snode = self._snode
+        end_snode = self._o_snode
+        if start_snode != end_snode:
+            current_snode = end_snode
+            node_path.append(current_snode)
+            while current_snode != start_snode:
+                found_predecessor = False
+                for (pre_snode, snode) in self.substrate.in_edges[current_snode]:
+                    if self.var_z[(pre_snode, snode)].X > 0.5:
+                        node_path.append(pre_snode)
+                        cost_value += self.edge_costs[(pre_snode, snode)]
+                        latency += self.edge_latencies[(pre_snode, snode)]
+                        current_snode = pre_snode
+                        found_predecessor = True
+                        break
+                if not found_predecessor:
+                    raise RuntimeError("Couldn't backtrack path!")
+            pre_snode = node_path.pop()
+            while len(node_path) > 0:
+               post_snode = node_path.pop()
+               edge_path.append((pre_snode,post_snode))
+               pre_snode = post_snode
+
+        return (edge_path, cost_value, latency)
+
+    def post_process_integral_computation(self):
+        return self.solution
+
+
+
+
+class ShortestValidPathsComputer_Exact_MIP(ShortestValidPathsComputer):
+    def __init__(self, substrate, valid_mapping_restriction_computer, edge_costs, edge_latencies, epsilon, limit):
+        super(ShortestValidPathsComputer_Exact_MIP, self).__init__(substrate, valid_mapping_restriction_computer,
+                                                              edge_costs, edge_latencies, epsilon, limit)
+
+        self.lcspmc = LatencyConstrainedShortestPathsMIPComputer(substrate, valid_mapping_restriction_computer, edge_costs, edge_latencies, epsilon, limit)
+        self.lcspmc.init_model_creator()
+
+    def compute(self):
+        self.lcspmc.compute_all_pairs_shortest_paths()
+
+    def recompute_with_new_costs(self, new_edge_costs):
+        self.lcspmc.edge_costs = new_edge_costs
+        self.lcspmc.create_objective()
+        self.lcspmc.model.update()
+        self.compute()
+
+    """ Getter functions for retrieving calculation results """
+    def get_valid_sedge_costs_for_reqedge(self, request_edge, mapping_edge):
+        #TODO: refactor: mapping_edge is a little bit misleading here
+        edge_set_index = self.valid_mapping_restriction_computer.get_reqedge_to_edgeset_id_mapping()[request_edge]
+        return self.lcspmc.valid_sedge_costs[edge_set_index][mapping_edge]
+
+    def get_valid_sedge_costs_from_edgesetindex(self, edge_set_index, reqedge):
+        return self.valid_sedge_costs[edge_set_index][reqedge]
+
+    def get_valid_sedge_path(self, request_edge, source_mapping, target_mapping):
+        edge_set_index = self.valid_mapping_restriction_computer.get_reqedge_to_edgeset_id_mapping()[request_edge]
+        return self.lcspmc.valid_sedge_paths[edge_set_index][(source_mapping, target_mapping)]
+# end
+
 
 class OptimizedDynVMPNode(object):
 

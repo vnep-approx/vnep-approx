@@ -11,9 +11,16 @@
 set -e
 shopt -s nullglob
 
+function deletelog() {
+  rm -r log
+  mkdir log
+}
+
+export ALIB_EXPERIMENT_HOME="."
+
 function move_logs_and_output() {
     # echo "moving files"
-	for file in $ALIB_EXPERIMENT_HOME/output/*; 	do mv $file $ALIB_EXPERIMENT_HOME/input/; done
+	mv $ALIB_EXPERIMENT_HOME/output/* $ALIB_EXPERIMENT_HOME/input/
 	deletelog
 }
 
@@ -33,7 +40,7 @@ FILTER_GENERATION_PARAMS="None"#"['edge_resource_factor', 'node_resource_factor'
 
 function new_scenarios() {
     echo "Generate Scenarios"
-    python -m vnep_approx.cli generate_scenarios scenarios2.pickle latency_scenarios.yml
+    python -m vnep_approx.cli generate_scenarios scenarios.pickle latency_scenarios.yml
     move_logs_and_output
 }
 
@@ -45,7 +52,7 @@ function run_baseline() {
 
 function run_approx() {
     echo "Run Approx"
-    python -m vnep_approx.cli start_experiment latency_execution.yml 0 10000 --concurrent 2 --remove_temporary_scenarios --remove_intermediate_solutions
+    python -m vnep_approx.cli start_experiment latency_execution.yml 0 10000 --concurrent 8 --remove_temporary_scenarios --remove_intermediate_solutions
     move_logs_and_output
 }
 
@@ -59,47 +66,28 @@ function reduce_approx() {
     python -m evaluation_acm_ccr_2019.cli reduce_to_plotdata_rr_seplp_optdynvmp latency_study_results.pickle
     move_logs_and_output
 }
-function eval() {
-    echo "Evaluate"
-    python -m evaluation_acm_ccr_2019.cli evaluate_separation_with_latencies baseline_results_reduced.pickle latency_study_results_reduced.pickle ./plots/ --filter_parameter_keys "$FILTER_GENERATION_PARAMS" --filter_exec_params "$EXCLUDE_EXEC_PARAMS" --output_filetype png
-    move_logs_and_output
-}
 
+rm -r log
+#rm -r input
+rm -r output
+mkdir -p log input output
 
-deletelog
+#new_scenarios
 
-if [ "$NEW_SCENARIOS" = true ]
-    then new_scenarios
-    else echo "Skipping Scenario generation"
-fi
+run_approx
 
-if [ "$RUN_APPROX" = true ]
-    then run_approx
-    else echo "Skipping Approx execution"
-fi
+run_baseline
 
-if [ "$RUN_BASELINE" = true ]
-    then run_baseline
-    else echo "Skipping Baseline execution"
-fi
+reduce_approx
 
-if [ "$RUN_APPROX" = true ]
-    then reduce_approx
-    else echo "Skipping Approx reduction"
-fi
-
-if [ "$RUN_BASELINE" = true ]
-    then reduce_baseline
-    else echo "Skipping Baseline reduction"
-fi
-
+reduce_baseline
 
 #generate plots in folder ./plots
-mkdir -p ./plots
-
-if [ "$EVAL" = true ]
-    then eval
-    else echo "Skipping Evaluation"
-fi
+#mkdir -p ./plots
+#
+#if [ "$EVAL" = true ]
+#    then eval
+#    else echo "Skipping Evaluation"
+#fi
 
 rm gurobi.log

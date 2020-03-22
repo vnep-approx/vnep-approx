@@ -1,18 +1,26 @@
 import copy
-
 import pytest
+import warnings
+
 import vine_test_data as vtd
 from vnep_approx import vine
 
 from alib import datamodel, solutions
 
 
+
 @pytest.mark.parametrize("lp_objective", list(vine.ViNELPObjective))
 @pytest.mark.parametrize("test_case", vtd.SHORTEST_PATH_TEST_CASES)
 def test_single_request_embeddings_shortest_path_method(lp_objective, test_case):
+    if lp_objective == vine.ViNELPObjective.ViNE_COSTS_DEF or lp_objective == vine.ViNELPObjective.ViNE_LB_DEF:
+        warnings.warn("The objectives VINE_COSTS_DEF and VINE_LB_DEF are inherently incompatible with this test, as specific Scenario costs are set!\n" 
+                      "Accordingly, this test is not executed!")
+        return
+
     test_data = vtd.SINGLE_REQUEST_EMBEDDING_TEST_CASES[test_case]
 
     scenario = vtd.get_test_scenario(test_data)
+
 
     v = vine.OfflineViNEAlgorithm(scenario,
                                   edge_embedding_model=vine.ViNEEdgeEmbeddingModel.UNSPLITTABLE,

@@ -176,7 +176,7 @@ SINGLE_REQUEST_EMBEDDING_TEST_CASES = dict(
             ),
         ),
         substrate_kwargs=dict(
-            node_costs=dict(u1=dict(t=0.5))
+            node_costs=dict(u1=dict(t=0.5), u2=dict(t=200))
         ),
         expected_integer_solution=dict(
             mapping_nodes=dict(

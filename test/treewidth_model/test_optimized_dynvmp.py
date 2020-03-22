@@ -5,9 +5,8 @@ import numpy as np
 
 from alib import mip
 from alib import datamodel as dm
-from test_data.request_test_data import create_test_request, example_requests, example_requests_small, \
-    create_test_substrate_large
-from test_data.substrate_test_data import create_test_substrate
+from test_data.request_test_data import create_test_request, example_requests, example_requests_small
+from test_data.substrate_test_data import create_test_substrate_topology_zoo
 
 import random
 import time
@@ -20,7 +19,7 @@ random.seed(0)
                          example_requests)
 def test_valid_mapping_restriction_computer(request_id):
     req = create_test_request(request_id, set_allowed_nodes=False)
-    sub = create_test_substrate_large()
+    sub = create_test_substrate_topology_zoo()
     # print(req)
     # print(sub)
     vmrc = treewidth_model.ValidMappingRestrictionComputer(sub, req)
@@ -89,70 +88,12 @@ def test_valid_mapping_restriction_computer(request_id):
         assert sedges_with_not_enough_capacity.union(forbidden_sedges).union(set(allowed_edges)) == substrate_edge_set
 
 
-# TEST Valid Shortest Path Computer
-@pytest.mark.parametrize("request_id",
-                         example_requests)
-def test_shortest_valid_paths_computer(request_id):
-    req = create_test_request(request_id, set_allowed_nodes=False)
-    sub = create_test_substrate_large()
-    # print(req)
-    # print(sub)
-    vmrc = treewidth_model.ValidMappingRestrictionComputer(sub, req)
-    vmrc.compute()
-
-    # uniform edge costs
-
-    edge_costs = {sedge: 1.0 for sedge in sub.edges}
-
-    svpc = treewidth_model.ShortestValidPathsComputer(sub, req, vmrc, edge_costs)
-
-    svpc.compute()
-
-    for reqedge in req.edges:
-        for snode_source in sub.nodes:
-            for snode_target in sub.nodes:
-                if snode_source == snode_target:
-                    assert svpc.valid_sedge_costs[reqedge][(snode_source, snode_target)] == 0
-                else:
-                    assert svpc.valid_sedge_costs[reqedge][(snode_source, snode_target)] >= 1
-
-    # random edge costs
-
-    edge_costs = {sedge: max(1, 1000.0 * random.random()) for sedge in sub.edges}
-    for sedge in sub.edges:
-        sub.edge[sedge]['cost'] = edge_costs[sedge]
-
-    bellman_ford_time = time.time()
-    sub.initialize_shortest_paths_costs()
-    bellman_ford_time = time.time() - bellman_ford_time
-
-    svpc = treewidth_model.ShortestValidPathsComputer(sub, req, vmrc, edge_costs)
-    dijkstra_time = time.time()
-    svpc.compute()
-    dijkstra_time = time.time() - dijkstra_time
-
-    for reqedge in req.edges:
-        for snode_source in sub.nodes:
-            for snode_target in sub.nodes:
-                # print svpc.valid_sedge_costs[reqedge][(snode_source, snode_target)]
-                # print sub.get_shortest_paths_cost(snode_source, snode_target)
-                assert svpc.valid_sedge_costs[reqedge][(snode_source, snode_target)] == pytest.approx(
-                    sub.get_shortest_paths_cost(snode_source, snode_target))
-
-    print(
-        "\nComputation times were:\n\tBellman-Ford: {}\n\tDijkstra:     {}\n\n\tSpeedup by using Dijkstra: {:2.2f} (<1 is bad)".format(
-            bellman_ford_time, dijkstra_time, (bellman_ford_time / dijkstra_time)))
-
-
 # TEST OptimizedDynVMP
 @pytest.mark.parametrize("request_id",
                          example_requests)
 def test_opt_dynvmp(request_id):
     req = create_test_request(request_id, set_allowed_nodes=False)
-    sub = create_test_substrate_large()
-
-    print sub.node
-
+    sub = create_test_substrate_topology_zoo()
     # assert that all nodes and all edges may be mapped anywhere...
     substrate_node_set = set(sub.nodes)
     substrate_edge_set = set(sub.edges)
@@ -249,7 +190,7 @@ def test_opt_dynvmp_and_classic_mcf_agree_for_unambiguous_scenario(
     print "allowed nodes: {} %, allowed edges: {} %".format(100 * allowed_nodes_ratio, 100 * allowed_edges_ratio)
     req = create_test_request(request_id, set_allowed_nodes=False)
     node_type = "test_type"
-    sub = create_test_substrate_large(node_types=[node_type])
+    sub = create_test_substrate_topology_zoo(node_types=[node_type])
     assert set(sub.get_types()) == {node_type}
 
     num_allowed_nodes = int(allowed_nodes_ratio * len(sub.nodes))

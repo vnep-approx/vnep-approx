@@ -1399,6 +1399,7 @@ class CactusGadget(AbstractGadget):
             flow_values,
             self.container_request.rounding_threshold,
             self.container_request.rounding_threshold,
+            1e-10,
             extended_graph=self.ext_graph,
             substrate_resources=self.container_request.substrate_resources,
             # logger=self.logger

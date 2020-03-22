@@ -392,7 +392,7 @@ class TestDecomposition:
             }
         }
 
-        decomposition = modelcreator_ecg_decomposition.Decomposition(req, sub, flow_values, 0.0001, 0.0001)
+        decomposition = modelcreator_ecg_decomposition.Decomposition(req, sub, flow_values, 0.0001, 0.0001, 1e-10)
         mappings = decomposition.compute_mappings()
         assert len(mappings) == 3
 
@@ -461,7 +461,7 @@ class TestDecomposition:
             }
         }
 
-        decomposition = modelcreator_ecg_decomposition.Decomposition(req, sub, flow_values, 0.0001, 0.0001)
+        decomposition = modelcreator_ecg_decomposition.Decomposition(req, sub, flow_values, 0.0001, 0.0001,1e-10)
         mappings = decomposition.compute_mappings()
         assert len(mappings) == 2
 

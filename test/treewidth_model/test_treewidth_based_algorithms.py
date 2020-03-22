@@ -2,8 +2,8 @@ import pytest
 from vnep_approx import treewidth_model
 
 from alib import datamodel
-from test_data.request_test_data import create_test_request, example_requests, create_random_test_request, create_test_substrate_large
-from test_data.substrate_test_data import create_test_substrate
+from test_data.request_test_data import create_test_request, example_requests, create_random_test_request
+from test_data.substrate_test_data import create_test_substrate_topology_zoo
 
 import random
 
@@ -46,7 +46,7 @@ def test_dyn_vmp_with_allowed_nodes_restrictions(request_id):
 
 
 def test_dyn_vmp_with_larger_scenario():
-    sub = create_test_substrate_large()
+    sub = create_test_substrate_topology_zoo()
 
     req = create_random_test_request(sub,
                                      min_number_nodes=8,
@@ -74,7 +74,7 @@ def test_dyn_vmp_with_larger_scenario():
 def test_tw_formulation_precomputed_scenario(request_id):
     # build test scenario
     req = create_test_request(request_id)
-    sub = create_test_substrate()
+    sub = create_test_substrate_topology_zoo()
     scenario = datamodel.Scenario(name="test_scen", substrate=sub, requests=[req])
 
     tw_mc = treewidth_model._TreewidthModelCreator(scenario)
@@ -82,7 +82,7 @@ def test_tw_formulation_precomputed_scenario(request_id):
 
 
 def test_mapping_space_works():
-    sub = create_test_substrate()
+    sub = get_test_substrate()
     req = create_test_request("simple path")
     req.node["i1"]["allowed_nodes"] = ["u", "v"]
     req.node["i2"]["allowed_nodes"] = ["w"]
