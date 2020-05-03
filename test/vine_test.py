@@ -7,7 +7,7 @@ from vnep_approx import vine
 from alib import datamodel, solutions
 
 
-@pytest.mark.parametrize("lp_objective", list(vine.ViNELPObjective))
+@pytest.mark.parametrize("lp_objective", [vine.ViNELPObjective.ViNE_COSTS_INCL_SCENARIO_COSTS, vine.ViNELPObjective.ViNE_LB_INCL_SCENARIO_COSTS])
 @pytest.mark.parametrize("test_case", vtd.SHORTEST_PATH_TEST_CASES)
 def test_single_request_embeddings_shortest_path_method(lp_objective, test_case):
     test_data = vtd.SINGLE_REQUEST_EMBEDDING_TEST_CASES[test_case]
@@ -23,6 +23,7 @@ def test_single_request_embeddings_shortest_path_method(lp_objective, test_case)
     req, m = next(solution.request_mapping.iteritems())  # there should only be one...
 
     expected_mapping = test_data["expected_integer_solution"]
+    print test_case
     if expected_mapping is None:
         assert m is None
     else:
