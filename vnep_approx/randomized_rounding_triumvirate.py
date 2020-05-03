@@ -85,15 +85,12 @@ class RandomizedRoundingTriumvirate(object):
 
     def __init__(self, scenario, gurobi_settings=None, logger=None, number_of_solutions_to_round=1000, mdk_gurobi_parameters=None, write_lp_file_format=None, decomposition_epsilon=1e-10, relative_decomposition_abortion_epsilon=1e-3, absolute_decomposition_abortion_epsilon=1e-6):
         self.scenario = scenario
-
-
-
+        # This is the (relaxation) of the novel decomposable LP for cactus graphs.
         logger.info("Starting randomized rounding trivate for scenario {}".format(scenario.name))
 
         lp_output_file = None
         if write_lp_file_format is not None:
             lp_output_file = scenario.name + write_lp_file_format
-
 
         self.mc = modelcreator_ecg_decomposition.ModelCreatorCactusDecomposition(self.scenario,
                                                                                  gurobi_settings=gurobi_settings,
@@ -156,11 +153,13 @@ class RandomizedRoundingTriumvirate(object):
                                                lost_flow_in_decomposition=self.mc.lost_flow_in_the_decomposition,
                                                temporal_log=self.temporal_log,
                                                status=self.mc.status)
-
+        # First rounding heuristic. It might violate constraints, It is a collection of rounded solutions
         collection_of_samples_with_violations = self.collect_X_randomized_rounding_samples_with_potential_violations(self.number_of_solutions_to_round)
 
+        # Second rounding heuristic. It doesn't violate constraints. Gathers all requests for a while, until they don't violate constraints.
         result_wo_violations = self.round_solution_without_violations(self.number_of_solutions_to_round)
 
+        # Third rounding
         mdk = DecompositionMDK(self.scenario, self._fractional_solution, logger=self.logger, gurobi_settings=self.mdk_gurobi_settings)
         mdk.init_model_creator()
         mdk_solution = mdk.compute_integral_solution()
@@ -186,6 +185,7 @@ class RandomizedRoundingTriumvirate(object):
         for q in xrange(number_of_samples):
             time_rr0 = time.clock()
 
+            # this is an embedding (decision on which requests to embed) with rounded values -- profit and min/max load for this solution.
             profit, max_node_load, max_edge_load = self.rounding_iteration_violations_allowed_sampling_max_violations(L)
 
             time_rr = time.clock() - time_rr0
@@ -194,7 +194,7 @@ class RandomizedRoundingTriumvirate(object):
                                                             max_node_load=max_node_load,
                                                             max_edge_load=max_edge_load,
                                                             time_to_round_solution=time_rr)
-
+            # collection of many (violating) solution options
             data.append(solution_tuple)
 
         return data
@@ -326,6 +326,10 @@ class RandomizedRoundingTriumvirate(object):
 
 
 class DecompositionMDK(modelcreator.AbstractModelCreator):
+    """
+    Given the decomposition into convex combinations of valid mappings for each request,
+    the MDK computes the optimal rounding given all mapping possibilities found.
+    """
     def __init__(self,
                  scenario,
                  fractional_solution,
@@ -397,6 +401,7 @@ class DecompositionMDK(modelcreator.AbstractModelCreator):
         return
 
     def create_objective(self):
+        # the original objective of the LP which produced the decomposable fractional solutions
         objective = LinExpr()
         for req in self.var_embedding_variable:
             for fractional_mapping in self.var_embedding_variable[req]:

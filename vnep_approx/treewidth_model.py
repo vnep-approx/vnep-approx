@@ -428,6 +428,12 @@ class ValidMappingRestrictionComputer(object):
         self._process_edge_sets()
 
     def _process_request_node_mapping_restrictions(self):
+        """
+        Calculates the  allowed nodes of each request node respecting node demands (only one-by-one, NOT any cumulative subsets) and
+        substrate node location constraints.
+
+        :return:
+        """
 
         for reqnode in self.request.nodes:
             node_demand = self.request.get_node_demand(reqnode)
@@ -443,6 +449,11 @@ class ValidMappingRestrictionComputer(object):
             self.allowed_nodes[reqnode] = sorted(allowed_nodes)
 
     def _process_request_edge_mapping_restrictions(self):
+        """
+        Calcualtes allowed edges of a request edge based on (single mapping of) edge resource demand and substrate link restrictions.
+
+        :return:
+        """
         for reqedge in self.request.edges:
             edge_demand = self.request.get_edge_demand(reqedge)
             allowed_edges = self.request.get_allowed_edges(reqedge)
@@ -551,6 +562,12 @@ class ShortestValidPathsComputer(object):
         return out_neighbors_with_cost
 
     def _compute_valid_edge_mapping_costs(self):
+        """
+        Runs a Dijkstra's algorithm from each substrate node and calculates the distances using cost as weight function utilizing only
+        valid substrate nodes and edges for the elements of the object's request graph.
+
+        :return:
+        """
 
         for edge_set_index in range(self.number_of_valid_edge_sets):
 
@@ -766,7 +783,7 @@ class OptimizedDynVMPNode(object):
             raise ValueError("Given index {} is out of bounds [0,...,{}].".format(mapping_index,
                                                                                   self.number_of_potential_node_mappings))
 
-
+        # enumerates all possible mappings of this DynVMPNode
         result_node_mapping = {}
         for reversed_reqnode_index in range(self.number_of_request_nodes):
             request_node = self._reversed_contained_request_nodes[reversed_reqnode_index]
@@ -1007,9 +1024,12 @@ class OptimizedDynVMP(object):
 
     ''' The actual algorithm to compute optimal valid mappings using dynamic programming. Nearly all algorithmic challenging
         tasks are to be found in the implementation of the OptimizedDynVMPNode class.
+        The restrict_edge_mapping_to_fixed_paths parameter fixes the the paths to be preselected shortest path between any pair
+        of substrate nodes. Cannot work together with edge mapping restrictions!
     '''
 
-    def __init__(self, substrate, request, ssntda, initial_snode_costs = None, initial_sedge_costs = None):
+    def __init__(self, substrate, request, ssntda, initial_snode_costs = None, initial_sedge_costs = None,
+                 restrict_edge_mapping_to_fixed_paths = False):
         self.substrate = substrate
         self.request = request
         if not isinstance(ssntda, SmallSemiNiceTDArb):
@@ -1017,6 +1037,8 @@ class OptimizedDynVMP(object):
         self.ssntda = ssntda
 
         self._initialize_costs(initial_snode_costs, initial_sedge_costs)
+
+        self.restrict_edge_mapping_to_fixed_paths = restrict_edge_mapping_to_fixed_paths
 
         self.vmrc = ValidMappingRestrictionComputer(substrate=substrate, request=request)
         self.svpc = ShortestValidPathsComputer(substrate=substrate, request=request, valid_mapping_restriction_computer=self.vmrc, edge_costs=self.sedge_costs)
@@ -1047,6 +1069,10 @@ class OptimizedDynVMP(object):
         self.svpc.compute()
 
         self.sorted_snodes = sorted(list(self.substrate.nodes))
+        if self.restrict_edge_mapping_to_fixed_paths:
+            self.fixed_paths_for_edge_mapping = {(snode_1,snode_2) : self.shortest_path(snode_1, snode_2, 0)
+                                                    for (snode_1,snode_2) in itertools.product(self.sorted_snodes, self.sorted_snodes)}
+
         self.sorted_snode_index = {snode : self.sorted_snodes.index(snode) for snode in self.sorted_snodes}
 
         self.number_of_nodes = len(self.sorted_snodes)
@@ -1059,6 +1085,7 @@ class OptimizedDynVMP(object):
         self._initialize_cost_arrays()
 
         self.dynvmp_tree_nodes = {}
+        # takes the tree decomposition's node and creates a DynVMPNode instance for each of the bags
         for t in self.ssntda.post_order_traversal:
             self.dynvmp_tree_nodes[t] = OptimizedDynVMPNode(self, t)
             self.dynvmp_tree_nodes[t].initialize()
@@ -1143,17 +1170,19 @@ class OptimizedDynVMP(object):
             result.append(self.recover_mapping(root_mapping_index=mapping_index)[1])
         return result
 
-
     def _reconstruct_edge_mapping(self, reqedge, source_mapping, target_mapping):
-        reqedge_predecessors = self.svpc.valid_sedge_pred[reqedge][source_mapping]
-        u = target_mapping
-        path = []
-        while u != source_mapping:
-            pred = reqedge_predecessors[u]
-            path.append((pred, u))
-            u = pred
-        path = list(reversed(path))
-        return path
+        if self.restrict_edge_mapping_to_fixed_paths:
+            return self.fixed_paths_for_edge_mapping[(source_mapping, target_mapping)]
+        else:
+            reqedge_predecessors = self.svpc.valid_sedge_pred[reqedge][source_mapping]
+            u = target_mapping
+            path = []
+            while u != source_mapping:
+                pred = reqedge_predecessors[u]
+                path.append((pred, u))
+                u = pred
+            path = list(reversed(path))
+            return path
 
     def _recover_node_mapping(self, root_mapping_index = None):
         fixed_node_mappings = {}
@@ -1213,6 +1242,33 @@ class OptimizedDynVMP(object):
 
         for t in self.ssntda.post_order_traversal:
             self.dynvmp_tree_nodes[t].reinitialize()
+
+    def shortest_path(self, start, target, min_capacity):
+        # Copied from the DynVMPAlgorithm
+        # Dijkstra algorithm (https://en.wikipedia.org/wiki/Dijkstra%27s_algorithm#Pseudocode)
+        distance = {node: INFINITY for node in self.substrate.nodes}
+        prev = {u: None for u in self.substrate.nodes}
+        distance[start] = 0
+        q = set(self.substrate.nodes)
+        while q:
+            u = min(q, key=lambda x: distance[x])
+            if u == target:
+                break
+            q.remove(u)
+            for uv in self.substrate.get_out_edges(u):
+                if self.substrate.get_edge_capacity(uv) < min_capacity:
+                    continue  # avoid using edges that are too small
+                v = uv[1]
+                new_dist = distance[u] + self.substrate.get_edge_cost(uv)
+                if new_dist < distance[v]:
+                    distance[v] = new_dist
+                    prev[v] = u
+        path = []
+        u = target
+        while u is not start:
+            path.append((prev[u], u))
+            u = prev[u]
+        return list(reversed(path))
 
 
 """ Computing tree decompositions """
@@ -1398,7 +1454,10 @@ class SeparationLP_OptDynVMP(object):
     def __init__(self,
                  scenario,
                  gurobi_settings=None,
-                 logger=None):
+                 logger=None,
+                 number_further_mappings_to_add=5,
+                 number_initial_mappings_to_compute=100,
+                 restrict_edge_mapping_to_fixed_paths=False):
         self.scenario = scenario
         self.substrate = self.scenario.substrate
         self.requests = self.scenario.requests
@@ -1428,6 +1487,10 @@ class SeparationLP_OptDynVMP(object):
             self.logger = util.get_logger(__name__, make_file=False, propagate=True)
         else:
             self.logger = logger
+
+        self.number_further_mappings_to_add = number_further_mappings_to_add
+        self.number_initial_mappings_to_compute = number_initial_mappings_to_compute
+        self.restrict_edge_mapping_to_fixed_paths = restrict_edge_mapping_to_fixed_paths
 
     def init_model_creator(self):
         ''' Initializes the modelcreator by generating the model. Afterwards, model.compute() can be called to let
@@ -1493,7 +1556,8 @@ class SeparationLP_OptDynVMP(object):
                                          req,
                                          self.tree_decomps[req],
                                          initial_snode_costs=self.dual_costs_node_resources,
-                                         initial_sedge_costs=self.dual_costs_edge_resources)
+                                         initial_sedge_costs=self.dual_costs_edge_resources,
+                                         restrict_edge_mapping_to_fixed_paths=self.restrict_edge_mapping_to_fixed_paths)
             opt_dynvmp.initialize_data_structures()
             self.dynvmp_runtimes_initialization[req].append(time.time()-dynvmp_init_time)
             self.dynvmp_instances[req] = opt_dynvmp
@@ -1593,7 +1657,8 @@ class SeparationLP_OptDynVMP(object):
             self.dynvmp_runtimes_computation[req].append(time.time() - single_dynvmp_runtime)
             opt_cost = dynvmp_instance.get_optimal_solution_cost()
             if opt_cost is not None and opt_cost < 0.995*(req.profit - self.dual_costs_requests[req]):
-                self.introduce_new_columns(req, maximum_number_of_columns_to_introduce=5, cutoff = req.profit-self.dual_costs_requests[req])
+                self.introduce_new_columns(req, maximum_number_of_columns_to_introduce=self.number_further_mappings_to_add,
+                                           cutoff = req.profit-self.dual_costs_requests[req])
                 new_columns_generated = True
 
         return new_columns_generated
@@ -1642,7 +1707,7 @@ class SeparationLP_OptDynVMP(object):
             opt_cost = dynvmp_instance.get_optimal_solution_cost()
             if opt_cost is not None:
                 self.logger.debug("Introducing new columns for {}".format(req.name))
-                self.introduce_new_columns(req, maximum_number_of_columns_to_introduce=100)
+                self.introduce_new_columns(req, maximum_number_of_columns_to_introduce=self.number_initial_mappings_to_compute)
 
         self.model.update()
 
@@ -1652,7 +1717,7 @@ class SeparationLP_OptDynVMP(object):
         current_obj = 0
         #the abortion criterion here is not perfect and should probably depend on the relative error instead of the
         #absolute one.
-        while new_columns_generated and abs(current_obj-last_obj) > 0.1:
+        while new_columns_generated and abs(current_obj-last_obj) > 0.001:
             gurobi_runtime = time.time()
             self.model.optimize()
             last_obj = current_obj
@@ -1663,6 +1728,10 @@ class SeparationLP_OptDynVMP(object):
             new_columns_generated = self.perform_separation_and_introduce_new_columns()
 
             counter += 1
+        # We might have to run a last optimization, if we have exited due to falling below the required absolute error of the objective
+        if new_columns_generated:
+            # NOTE: shouldn't another update be executed before the optimize runs?
+            self.model.optimize()
 
         self.time_optimization = time.time() - time_optimization_start
 
@@ -1833,6 +1902,8 @@ class SeparationLP_OptDynVMP(object):
 
 
 class RoundingOrder(enum.Enum):
+    # in case of the cost variant there is a heuristic when the rounding order does not matter, let's indicate it explicitly
+    NONE = "NONE"
     RANDOM = "RAND"
     STATIC_REQ_PROFIT = "STATIC_REQ_PROFIT"
     ACHIEVED_REQ_PROFIT = "ACHIEVED_REQ_PROFIT"
@@ -1846,19 +1917,19 @@ class LPRecomputationMode(enum.Enum):
 
 RandomizedRoundingSolution = namedtuple("RandomizedRoundingSolution", ["solution",
                                                                        "profit",
+                                                                       "cost",
                                                                        "max_node_load",
                                                                        "max_edge_load",
                                                                        "time_to_round_solution"])
 
 
-
-
 class RandRoundSepLPOptDynVMPCollectionResult(modelcreator.AlgorithmResult):
 
-    def __init__(self, scenario, lp_computation_information):
+    def __init__(self, scenario, lp_computation_information, overall_feasible=True):
         self.scenario = scenario
         self.lp_computation_information = lp_computation_information
         self.solutions = {}
+        self.overall_feasible = overall_feasible
 
     def add_solution(self, rounding_order, lp_recomputation_mode, solution):
         identifier = (lp_recomputation_mode, rounding_order)
@@ -1889,6 +1960,7 @@ class RandRoundSepLPOptDynVMPCollectionResult(modelcreator.AlgorithmResult):
                 else:
                     new_list_of_solutions.append(RandomizedRoundingSolution(solution=None,
                                                                             profit=solution.profit,
+                                                                            cost=solution.cost,
                                                                             max_node_load=solution.max_node_load,
                                                                             max_edge_load=solution.max_edge_load,
                                                                             time_to_round_solution=solution.time_to_round_solution))
@@ -1916,8 +1988,6 @@ class RandRoundSepLPOptDynVMPCollectionResult(modelcreator.AlgorithmResult):
 
         rr_solution.solution.scenario = original_scenario
         return rr_solution
-
-
 
     def _get_solution_overview(self):
         result = "\n\t{:^10s} | {:^40s} {:^20s} | {:^8s}\n".format("PROFIT", "LP Recomputation Mode", "Rounding Order", "INDEX")
@@ -1948,7 +2018,11 @@ class RandRoundSepLPOptDynVMPCollection(object):
                  number_initial_mappings_to_compute,
                  number_further_mappings_to_add,
                  gurobi_settings=None,
-                 logger=None):
+                 logger=None,
+                 calculate_cost_of_integral_solutions=False,
+                 skip_zero_profit_reqs_at_rounding_iteration=True,
+                 allow_resource_capacity_violations=False,
+                 restrict_edge_mapping_to_fixed_paths=False):
         self.scenario = scenario
         self.substrate = self.scenario.substrate
         self.requests = self.scenario.requests
@@ -1979,12 +2053,7 @@ class RandRoundSepLPOptDynVMPCollection(object):
             else:
                 raise ValueError("Cannot handle this LP recomputation mode.")
 
-        if self.objective == datamodel.Objective.MAX_PROFIT:
-            pass
-        elif self.objective == datamodel.Objective.MIN_COST:
-            raise ValueError("The separation LP algorithm can at the moment just handle max-profit instances.")
-        else:
-            raise ValueError("The separation LP algorithm can at the moment just handle max-profit instances.")
+        self.check_supported_objective()
 
         self.gurobi_settings = gurobi_settings
 
@@ -2003,6 +2072,22 @@ class RandRoundSepLPOptDynVMPCollection(object):
             self.logger = util.get_logger(__name__, make_file=False, propagate=True)
         else:
             self.logger = logger
+        self.calculate_cost_of_integral_solutions = calculate_cost_of_integral_solutions
+        self.skip_zero_profit_reqs_at_rounding_iteration = skip_zero_profit_reqs_at_rounding_iteration
+        self.allow_resource_capacity_violations = allow_resource_capacity_violations
+        self.restrict_edge_mapping_to_fixed_paths = restrict_edge_mapping_to_fixed_paths
+
+    def check_supported_objective(self):
+        '''Raised ValueError if a not supported objective is found in the input scenario
+        :return:
+        '''
+        if self.objective == datamodel.Objective.MAX_PROFIT:
+            pass
+        elif self.objective == datamodel.Objective.MIN_COST:
+            raise ValueError("The separation LP algorithm can at the moment just handle max-profit instances.")
+        else:
+            raise ValueError("The separation LP algorithm can at the moment just handle max-profit instances.")
+
 
     def init_model_creator(self):
         ''' Initializes the modelcreator by generating the model. Afterwards, model.compute() can be called to let
@@ -2070,7 +2155,8 @@ class RandRoundSepLPOptDynVMPCollection(object):
                                          req,
                                          self.tree_decomps[req],
                                          initial_snode_costs=self.dual_costs_node_resources,
-                                         initial_sedge_costs=self.dual_costs_edge_resources)
+                                         initial_sedge_costs=self.dual_costs_edge_resources,
+                                         restrict_edge_mapping_to_fixed_paths=self.restrict_edge_mapping_to_fixed_paths)
             opt_dynvmp.initialize_data_structures()
             self.dynvmp_runtimes_initialization[req].append(time.time()-dynvmp_init_time)
             self.dynvmp_instances[req] = opt_dynvmp
@@ -2271,18 +2357,12 @@ class RandRoundSepLPOptDynVMPCollection(object):
         self.logger.info("Successfully loaded warmstart LP Basis (whether this basis is used in the following is indicated by the log of gurobi).")
 
 
-    def compute_solution(self):
-        ''' Abstract function computing an integral solution to the model (generated before).
+    def get_first_mappings_for_requests(self):
+        """
+        Initialize the objective function by introducing some variables for all of the requests.
 
-        :return: Result of the optimization consisting of an instance of the GurobiStatus together with a result
-                 detailing the solution computed by Gurobi.
-        '''
-        self.logger.info("Starting computing solution")
-        # do the optimization
-        time_optimization_start = time.time()
-
-        #do the magic here
-
+        :return: True, whether an initial mappings have been found (should always find)
+        """
         for req in self.requests:
             self.logger.debug("Getting first mappings for request {}".format(req.name))
             # execute algorithm
@@ -2295,8 +2375,40 @@ class RandRoundSepLPOptDynVMPCollection(object):
                 self.logger.debug("Introducing new columns for {}".format(req.name))
                 self.introduce_new_columns(req,
                                            maximum_number_of_columns_to_introduce=self.number_initial_mappings_to_compute)
-
         self.model.update()
+        return True
+
+    def construct_results_record(self, scenario, sep_lp_solution, overall_feasible):
+        """
+        Must create the self.result variable with an instance of RandRoundSepLPOptDynVMPCollectionResult.
+
+        :param scenario:
+        :param sep_lp_solution:
+        :param overall_feasible:
+        :return:
+        """
+        if not overall_feasible:
+            self.logger.exception("No feasible mapping found for profit maximization! "
+                                  "This should not happen with proper scenario generation!")
+        self.result = RandRoundSepLPOptDynVMPCollectionResult(scenario=scenario,
+                                                              lp_computation_information=sep_lp_solution,
+                                                              overall_feasible=overall_feasible)
+
+    def compute_solution(self):
+        ''' Abstract function computing an integral solution to the model (generated before).
+
+        :return: Result of the optimization consisting of an instance of the GurobiStatus together with a result
+                 detailing the solution computed by Gurobi.
+        '''
+        self.logger.info("Starting computing solution")
+        # do the optimization
+        time_optimization_start = time.time()
+
+        #do the magic here
+        # if no initial mappings are found, we need to terminate
+        if not self.get_first_mappings_for_requests():
+            self.construct_results_record(self.scenario, None, False)
+            return self.result
 
         new_columns_generated = True
         counter = 0
@@ -2363,19 +2475,32 @@ class RandRoundSepLPOptDynVMPCollection(object):
                                                objVal,
                                                number_of_generated_mappings)
 
-        self.result = RandRoundSepLPOptDynVMPCollectionResult(scenario=self.scenario,
-                                                              lp_computation_information=sep_lp_solution)
+        # Construct results record, sets self.result
+        self.construct_results_record(self.scenario, sep_lp_solution, True)
 
         self.perform_rounding()
         #self.logger.info("Best solution by rounding is {}".format(best_solution))
 
+        # after the randomized rounding is finished
+        self.result.lp_computation_information.time_postprocessing = time.time() - self._time_postprocess_start
+
+        # might happen that the given roundings do not find a solution with the given computation modes
+        found_any_solution = False
+        for identifier in self.result.solutions.keys():
+            if len(self.result.solutions[identifier]) > 0:
+                found_any_solution = True
+        if not found_any_solution:
+            self.logger.warn("No solution found by any given randomized rounding setting ... manually setting result "
+                             "scenario infeasibility!")
+            self.result.overall_feasible = False
         return self.result
 
 
 
 
     def remove_impossible_mappings_and_reoptimize(self, currently_fixed_allocations, fixed_requests, lp_computation_mode):
-        #self.logger.debug("Removing mappings that would violate capacities given the current state..")
+        self.logger.debug("Removing mappings that would violate capacities given the current state..")
+        newly_adapted_variable_count = 0
         for req in self.requests:
             if req in fixed_requests:
                 continue
@@ -2383,14 +2508,19 @@ class RandRoundSepLPOptDynVMPCollection(object):
                 if not self.check_whether_mapping_would_obey_resource_violations(currently_fixed_allocations, self.allocations_of_mappings[req][mapping_index]):
                     self.mapping_variables[req][mapping_index].ub = 0.0
                     self.adapted_variables.append(self.mapping_variables[req][mapping_index])
+                    newly_adapted_variable_count += 1
 
-
-        #self.logger.debug("Re-compute LP after removal of impossible columns")
-
+        self.logger.debug("Re-compute LP after removal of impossible columns, number of adapted variables {}".
+                          format(newly_adapted_variable_count))
         self.model.update()
         self.model.optimize()
-        current_obj = self.model.getAttr("ObjVal")
-
+        if self.model.getAttr("SolCount") > 0:
+            current_obj = self.model.getAttr("ObjVal")
+        else:
+            self.logger.debug("Model became infeasible after removing impossible mappings")
+            # this recomputation mode with removing the violated constraints didn't lead to a solution
+            # we have to rely on other recomputation mode, rounding order combinations.
+            return
         if lp_computation_mode == LPRecomputationMode.RECOMPUTATION_WITH_SINGLE_SEPARATION:
             new_columns_generated = True
             while new_columns_generated:
@@ -2398,7 +2528,7 @@ class RandRoundSepLPOptDynVMPCollection(object):
                 new_columns_generated = self.perform_separation_and_introduce_new_columns(current_objective=current_obj,
                                                                                           ignore_requests=fixed_requests)
                 if new_columns_generated:
-                    #self.logger.debug("Separation yielded new mappings. Reoptimizing!")
+                    self.logger.debug("Separation yielded new mappings. Reoptimizing!")
                     self.model.update()
                     self.model.optimize()
                     current_obj = self.model.getAttr("ObjVal")
@@ -2413,13 +2543,14 @@ class RandRoundSepLPOptDynVMPCollection(object):
                         self.mapping_variables[req][mapping_index].ub = 0.0
                         self.adapted_variables.append(self.mapping_variables[req][mapping_index])
 
-
             #self.logger.debug("Re-compute after removal of stupid mappings...")
 
             self.model.update()
             self.model.optimize()
 
-
+    def validate_randomized_rounding_solutions(self):
+        # in case of the profit variant there is nothing to do, all solutions should be ok.
+        pass
 
     def perform_rounding(self):
 
@@ -2433,10 +2564,29 @@ class RandRoundSepLPOptDynVMPCollection(object):
 
         for lp_computation_mode in actual_lp_computation_modes:
             for rounding_order in self.rounding_order_list:
-                result_list = self.round_solution_without_violations(lp_computation_mode, rounding_order)
+                if not self.allow_resource_capacity_violations:
+                    result_list = self.round_solution_without_violations(lp_computation_mode, rounding_order)
+                else:
+                    # NOTE: currently we have only one lp recomp and rounding order each for this variant, but there might be more
+                    result_list = self.round_solution_with_violations(lp_computation_mode, rounding_order)
+                if len(result_list) == 0:
+                    self.logger.info("LP computation mode {} with rounding order {} did not find any solution, "
+                                     "constraint validation allowed: {}".format(lp_computation_mode, rounding_order,
+                                                                                self.allow_resource_capacity_violations))
                 for solution in result_list:
                     self.result.add_solution(rounding_order, lp_computation_mode, solution=solution)
+        self.validate_randomized_rounding_solutions()
         self.logger.debug(self.result._get_solution_overview())
+
+    def round_solution_with_violations(self, lp_computation_mode, rounding_order):
+        """
+        Returns list of integers solutions of the given randomized rounding setting.
+
+        :param lp_computation_mode:
+        :param rounding_order:
+        :return:
+        """
+        raise NotImplementedError("Allowing capacity violations for profit variant is not implemented.")
 
     def round_solution_without_violations(self, lp_computation_mode, rounding_order):
 
@@ -2444,7 +2594,8 @@ class RandRoundSepLPOptDynVMPCollection(object):
 
         result_list = []
 
-        self.logger.debug("Executing rounding according to settings: {} {}".format(lp_computation_mode.value, rounding_order.value))
+        self.logger.debug("Executing rounding (without allowing capacity violations) according to settings: {} {}".
+                          format(lp_computation_mode.value, rounding_order.value))
 
         for q in xrange(self.rounding_samples_per_lp_recomputation_mode[lp_computation_mode]):
             #recompute optimal solution
@@ -2452,7 +2603,8 @@ class RandRoundSepLPOptDynVMPCollection(object):
 
             time_rr0 = time.time()
 
-            solution, profit, max_node_load, max_edge_load = self.rounding_iteration_violations_without_violations(A, lp_computation_mode, rounding_order)
+            solution, profit, cost, max_node_load, max_edge_load = \
+                self.rounding_iteration_violations_without_violations(A, lp_computation_mode, rounding_order)
 
             if lp_computation_mode != LPRecomputationMode.NONE:
                 self.model.reset()
@@ -2461,18 +2613,24 @@ class RandRoundSepLPOptDynVMPCollection(object):
 
             time_rr = time.time() - time_rr0
 
+            add_solution_to_results = True
+            if len(solution.request_mapping) == 0:
+                self.logger.debug("Scenario solution does not contain mapping any requests!")
+                add_solution_to_results = False
             if not solution.validate_solution():
                 self.logger.info("ERROR: scenario solution did not validate!")
             if not solution.validate_solution_fulfills_capacity():
                 self.logger.info("ERROR: scenario solution did not satisfy capacity constraints!")
 
-            solution_tuple = RandomizedRoundingSolution(solution=solution,
-                                                        profit=profit,
-                                                        max_node_load=max_node_load,
-                                                        max_edge_load=max_edge_load,
-                                                        time_to_round_solution=time_rr)
+            if add_solution_to_results:
+                solution_tuple = RandomizedRoundingSolution(solution=solution,
+                                                            profit=profit,
+                                                            cost=cost,
+                                                            max_node_load=max_node_load,
+                                                            max_edge_load=max_edge_load,
+                                                            time_to_round_solution=time_rr)
 
-            result_list.append(solution_tuple)
+                result_list.append(solution_tuple)
 
         return result_list
 
@@ -2519,7 +2677,7 @@ class RandRoundSepLPOptDynVMPCollection(object):
             chosen_mapping = None
 
             for mapping_index, mapping in enumerate(self.mappings_of_requests[req]):
-                if req.profit < 0.0001:
+                if req.profit < 0.0001 and self.skip_zero_profit_reqs_at_rounding_iteration:
                     continue
                 total_flow += self.mapping_variables[req][mapping_index].X
                 if p < total_flow:
@@ -2527,8 +2685,8 @@ class RandRoundSepLPOptDynVMPCollection(object):
                     break
 
             if chosen_mapping is not None:
-
                 if self.check_whether_mapping_would_obey_resource_violations(A, self.allocations_of_mappings[req][chosen_mapping[0]]):
+                    self.logger.debug("Choosing constraint obeying mapping {} for request {}".format(chosen_mapping, req))
                     B += req.profit
                     for res in self.substrate_resources:
                         if res in self.allocations_of_mappings[req][chosen_mapping[0]].keys():
@@ -2539,7 +2697,15 @@ class RandRoundSepLPOptDynVMPCollection(object):
                         self.adapted_variables.append(self.mapping_variables[req][chosen_mapping[0]])
 
                     scenario_solution.add_mapping(req, chosen_mapping[1])
+                else:
+                    # NOTE: in case of the cost variant, this is a problem, because this integral solution won't meet the
+                    # constraint of mapping all requests! New reounding scheme needed??
+                    self.logger.debug("Discarding randomly chosen mapping {} for request {} due to violating constraints".
+                                      format(chosen_mapping, req))
             else:
+                # NOTE: in case of the cost variant this should never be the case because the variable values of the valid
+                # mappings sum up to 1.0
+                self.logger.debug("Not choosing any mapping for request {} in this randomized rounding iteration".format(req))
                 if lp_computation_mode != LPRecomputationMode.NONE:
                     for var in self.mapping_variables[req]:
                         var.ub = 0
@@ -2558,7 +2724,8 @@ class RandRoundSepLPOptDynVMPCollection(object):
             self.adapted_variables = []
 
         max_node_load, max_edge_load = self.calc_max_loads(A)
-        return scenario_solution, B, max_node_load, max_edge_load
+        cost = self.calc_cost_of_integral_solution(scenario_solution, A)
+        return scenario_solution, B, cost, max_node_load, max_edge_load
 
 
     def calc_max_loads(self, L):
@@ -2573,6 +2740,30 @@ class RandRoundSepLPOptDynVMPCollection(object):
             if ratio > max_edge_load:
                 max_edge_load = ratio
         return (max_node_load, max_edge_load)
+
+    def calc_cost_of_integral_solution(self, scenario_solution, allocations):
+        """
+        Calculate the total cost of an integral solution.
+
+        :param scenario_solution:
+        :param allocations:
+        :return:
+        """
+        if self.calculate_cost_of_integral_solutions:
+            substrate = scenario_solution.scenario.substrate
+            total_cost = 0.0
+            for sres, alloc in allocations.iteritems():
+                if sres[0] in substrate.types:
+                    ntype, node_id = sres
+                    res_cost = substrate.node[node_id]['cost'][ntype]
+                elif sres in substrate.edges:
+                    res_cost = substrate.edge[sres]['cost']
+                else:
+                    raise ValueError("Unexpected allocations format!")
+                total_cost += res_cost * alloc
+            return total_cost
+        else:
+            return None
 
     def check_whether_mapping_would_obey_resource_violations(self, L, mapping_loads):
         result = True
